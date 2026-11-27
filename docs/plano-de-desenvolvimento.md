@@ -301,7 +301,7 @@ Cada etapa termina com testes e com um PDF de exemplo conferido em quatro leitor
 
 | Etapa | Nome | Pilares | Status |
 |---|---|---|---|
-| 0 | Linha de base | G | em andamento: bomba de ARLA (diagnox) e EBS automático (valvulas) medidos ([linha-de-base.md](linha-de-base.md)); faltam NOx, eficiência e testes especiais do diagnox |
+| 0 | Linha de base | G | concluída em 27/11/2026 com um relatório de cada app ([linha-de-base.md](linha-de-base.md)) |
 | 1 | Prova de conceito (decide a abordagem) | P S G | concluída em 27/11/2026: seguir com B ([resultado](prova-de-conceito.md)) |
 | 2 | Fundação do pacote | — | pronta localmente; falta o CI rodar no GitHub (precisa de push) |
 | 3 | Escritor PDF | — | não iniciada |
@@ -320,13 +320,13 @@ Cada etapa termina com testes e com um PDF de exemplo conferido em quatro leitor
 
 **Objetivo:** ter os números de hoje para comparar depois.
 
-- [ ] Escolher o aparelho de referência (pergunta 9 da seção 11).
-- [ ] Medir nos dois apps, para cada tipo de relatório: tempo do toque no botão até o preview aberto, separado em captura dos gráficos, montagem, `save()` e escrita do arquivo.
-- [ ] Registrar o tamanho do arquivo de um relatório típico de cada tipo.
-- [ ] Guardar um PDF de referência de cada tipo de relatório para a comparação visual.
-- [ ] Registrar tudo em `docs/linha-de-base.md` (criado; bomba de ARLA e EBS automático registrados).
+- [x] Escolher o aparelho de referência (pergunta 9 da seção 11): o tablet SM-X133 ligado ao equipamento.
+- [x] Medir nos dois apps o tempo do toque no botão até o preview aberto, separado em captura dos gráficos, montagem, `save()` e escrita do arquivo: bomba de ARLA (diagnox) e EBS automático (valvulas).
+- [x] Registrar o tamanho do arquivo de cada relatório medido.
+- [x] Guardar um PDF de referência de cada relatório medido (`benchmark/results/`, fora do git).
+- [x] Registrar tudo em `docs/linha-de-base.md`.
 
-**Pronto quando:** existe um número de tempo e de tamanho para cada um dos cinco tipos de relatório (quatro do diagnox, um do valvulas).
+**Pronto quando:** existe um número de tempo e de tamanho para um relatório de cada app. Os outros tipos (NOx, eficiência e testes especiais do diagnox, ECA do valvulas) ficaram de fora por decisão do usuário em 27/11/2026 e são medidos quando forem migrados (etapas 11 e 12).
 
 ### 7.3 Etapa 1: prova de conceito
 
@@ -532,5 +532,5 @@ lib_pdf/
 6. **Plataformas:** o PDF precisa ser gerado também no web e no desktop do valvulas?
 7. **Componentes de relatório:** com a abordagem B, cada app pode usar os próprios componentes de tela no PDF. Ainda vale ter componentes compartilhados (cabeçalho, seção, tabela chave/valor) na lib?
 8. **Nome e distribuição:** nome do pacote e como os apps vão depender dele (git, pub privado).
-9. **Aparelho de referência** para a linha de base (etapa 0).
+9. ~~**Aparelho de referência** para a linha de base (etapa 0).~~ **Respondida em 27/11/2026:** o tablet SM-X133 ligado ao equipamento.
 10. **Paridade visual:** o papel pode mudar de visual na migração, ou deve ficar igual ao de hoje?

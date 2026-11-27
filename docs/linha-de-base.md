@@ -3,7 +3,7 @@
 > **O que é:** quanto os apps levam hoje para gerar cada relatório em PDF, e como é o arquivo, medidos no tablet
 > **Para que serve:** ser a referência que as migrações (etapas 11 e 12) precisam bater
 > **Quando consultar:** ao medir a lib nova num relatório migrado, e ao comparar o visual com o PDF de hoje
-> **Status:** em andamento. Medidos: bomba de ARLA (diagnox) e EBS automático (valvulas). Faltam: NOx, eficiência e testes especiais do diagnox.
+> **Status:** concluída em 27/11/2026 com um relatório de cada app: bomba de ARLA (diagnox) e EBS automático (valvulas). Os outros tipos são medidos quando forem migrados.
 
 ## 1. Como foi medido
 
@@ -66,13 +66,13 @@ O que o PDF de hoje mostra:
 
 O PDF de referência fica em `benchmark/results/actuall_ebs_automatico_10bar_2026-11-27.pdf`.
 
-## 3. Pendente
+## 3. Cobertura
 
 | App | Relatório | Situação |
 |---|---|---|
 | diagnox | Bomba de ARLA | medido (seção 2) |
-| diagnox | NOx | não medido |
-| diagnox | Eficiência do catalisador | não medido |
-| diagnox | Testes especiais | não medido |
+| diagnox | NOx | medir na migração (etapa 11) |
+| diagnox | Eficiência do catalisador | medir na migração (etapa 11) |
+| diagnox | Testes especiais | medir na migração (etapa 11) |
 | valvulas | EBS, teste automático de 10 bar | medido (seção 2) |
-| valvulas | ECA | não medido |
+| valvulas | ECA | medir na migração (etapa 12) |
