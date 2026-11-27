@@ -72,7 +72,7 @@ def compare(ref, out):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('folder', nargs='?', default='build/visual')
-    parser.add_argument('--limite', type=float, default=0.5, help='% máximo de pixels diferentes por caso')
+    parser.add_argument('--limite', type=float, default=0.5, help='%% máximo de pixels diferentes por caso')
     args = parser.parse_args()
 
     renderers = {name: fn for name, (exe, fn) in RENDERERS.items() if shutil.which(exe)}
