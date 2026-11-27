@@ -3,7 +3,7 @@
 > **O que é:** quanto os apps levam hoje para gerar cada relatório em PDF, e como é o arquivo, medidos no tablet
 > **Para que serve:** ser a referência que as migrações (etapas 11 e 12) precisam bater
 > **Quando consultar:** ao medir a lib nova num relatório migrado, e ao comparar o visual com o PDF de hoje
-> **Status:** em andamento. Medidos: bomba de ARLA (diagnox). Faltam: valvulas, NOx, eficiência e testes especiais.
+> **Status:** em andamento. Medidos: bomba de ARLA (diagnox) e EBS automático (valvulas). Faltam: NOx, eficiência e testes especiais do diagnox.
 
 ## 1. Como foi medido
 
@@ -12,8 +12,9 @@
 - **Início:** o toque no botão de PDF, confirmado pelo log do Android (`ViewPostIme`).
 - **Arquivo pronto:** o horário de gravação do PDF no cache do app, lido com `run-as`. Precisão de décimos de segundo.
 - **Página visível:** o primeiro print da tela em que a página aparece no visualizador. Os prints saem a cada 0,4 a 0,7 s, então essa medida tem essa margem.
+- **Etapas internas (só valvulas):** o actuall registra cada etapa da geração (`[RELATORIO][PDF]`) no log do Dart; em debug esse log vai para o VM service, que foi escutado durante a medida.
 
-**Atenção:** o diagnox medido é um APK de debug (3.7.3-dev, compilado em JIT). Em release, o tempo de hoje deve ser menor, então a comparação com a lib nova precisa usar o mesmo tipo de build dos dois lados. Os números da prova de conceito foram medidos em build `--profile` e em outra unidade do SM-X133, por isso não dá para compará-los direto com os desta página.
+**Atenção:** os dois apps medidos são APKs de debug (diagnox 3.7.3-dev e actuall 0.1.10-dev, compilados em JIT). Em release, o tempo de hoje deve ser menor, então a comparação com a lib nova precisa usar o mesmo tipo de build dos dois lados. Os números da prova de conceito foram medidos em build `--profile` e em outra unidade do SM-X133, por isso não dá para compará-los direto com os desta página.
 
 ## 2. Resultados
 
@@ -39,6 +40,32 @@ Na primeira tentativa, com o app rodando em debug, a geração travou depois da 
 
 O PDF de referência fica em `benchmark/results/diagnox_bomba_arla_2026-11-27.pdf`, fora do git porque tem dados do relatório.
 
+### valvulas (actuall): EBS, teste automático de 10 bar (27/11/2026, Simulação Knorr dupla, 1 ciclo)
+
+| Etapa | Tempo |
+|---|---|
+| Captura dos 4 gráficos: rola até cada card, espera, `toImage` com `pixelRatio: 3`, PNG | **4,27 s** (cerca de 0,9 s por card) |
+| Montagem: fontes, logo, QR, `addPage` | 0,43 s |
+| `pdf.save()` | **2,33 s** |
+| Gravação do arquivo | 0,01 s |
+| Toque → arquivo gravado | **7,1 s** |
+| Toque → página visível no `PdfPreview` | **entre 8,7 e 9,1 s** |
+
+| Arquivo | |
+|---|---|
+| Tamanho | 300 KB, 2 páginas |
+| Imagens | Quatro gráficos de 1444 × 996 px (cerca de 168 KB com as máscaras, 56 % do arquivo) e o logo, de 1489 × 399 px (116 KB, 39 %) |
+| Fontes | Montserrat Regular e Bold, embutidas |
+
+O que o PDF de hoje mostra:
+
+- **Dos cerca de 9 s, 6,6 s são a captura e o `save()`.** A captura dos gráficos sozinha leva quase metade do tempo, e o `save()` leva 2,3 s (o arquivo tem cinco imagens grandes para comprimir).
+- **Cada gráfico é uma foto da tela**, capturada card a card. Não há deformação (388 ppi nas duas direções), mas pixela ao ampliar e os rótulos não são texto.
+- **O logo pesa 116 KB:** é uma imagem de 1489 × 399 px desenhada com poucos centímetros (1218 ppi).
+- A seção de gráficos ocupa a página 2 inteira, com espaço em branco abaixo de cada par de cards, e se divide em "Gráficos" e "Gráficos (continuação 2/2)".
+
+O PDF de referência fica em `benchmark/results/actuall_ebs_automatico_10bar_2026-11-27.pdf`.
+
 ## 3. Pendente
 
 | App | Relatório | Situação |
@@ -47,4 +74,5 @@ O PDF de referência fica em `benchmark/results/diagnox_bomba_arla_2026-11-27.pd
 | diagnox | NOx | não medido |
 | diagnox | Eficiência do catalisador | não medido |
 | diagnox | Testes especiais | não medido |
-| valvulas | Relatório genérico (EBS/ECA) | não medido |
+| valvulas | EBS, teste automático de 10 bar | medido (seção 2) |
+| valvulas | ECA | não medido |
