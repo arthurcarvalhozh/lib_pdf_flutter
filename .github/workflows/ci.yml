@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Mesma versão do .fvmrc, do diagnox e do valvulas. A lib depende de
+      # detalhes da pintura do Flutter: trocar a versão aqui é o teste de
+      # que uma versão nova do Flutter pode ser usada nos apps.
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.1
+          channel: stable
+          cache: true
+
+      - name: Pacote
+        run: |
+          flutter pub get
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze
+          flutter test
+
+      - name: App de exemplo
+        working-directory: example
+        run: |
+          flutter pub get
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze
+          flutter test
+
+      - name: PDFs gerados pelos testes
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdfs
+          path: example/build/exemplo/*.pdf
+          if-no-files-found: ignore

@@ -1,0 +1,20 @@
+name: lib_pdf
+description: PDF feito com widgets do Flutter, em vetor e com texto real. Substitui o package:pdf e o package:printing no diagnox e no valvulas.
+version: 0.1.0-dev.1
+publish_to: none
+repository: https://github.com/arthurcarvalhozh/lib_pdf_flutter
+
+environment:
+  sdk: ^3.13.1
+  # A lib depende de detalhes da pintura do Flutter: cada versão nova do
+  # Flutter precisa passar pelos testes antes de ser usada nos apps.
+  flutter: ">=3.47.1"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0

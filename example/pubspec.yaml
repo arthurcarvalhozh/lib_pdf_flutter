@@ -1,0 +1,38 @@
+name: lib_pdf_example
+description: App de exemplo e de medida da lib_pdf.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  lib_pdf:
+    path: ../
+  # Mesmas versões do diagnox e do valvulas: o exemplo mostra que os widgets
+  # de terceiros que os apps já usam saem no PDF sem adaptação.
+  fl_chart: 0.68.0
+  qr_flutter: 4.1.0
+  # Só para o benchmark comparar com o método atual (foto do gráfico +
+  # package:pdf). Sai junto com o package:pdf dos apps, na etapa 13.
+  pdf: 3.11.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/fonts/
+  fonts:
+    - family: Montserrat
+      fonts:
+        - asset: assets/fonts/Montserrat-Regular.ttf
+        - asset: assets/fonts/Montserrat-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Montserrat-Bold.ttf
+          weight: 700
