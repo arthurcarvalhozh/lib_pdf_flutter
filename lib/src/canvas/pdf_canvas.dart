@@ -6,9 +6,10 @@ import 'package:flutter/painting.dart';
 
 import '../document/pdf_writer.dart';
 import '../text/truetype.dart';
+import 'pdf_shading.dart';
 
-/// Registro do que a pintura não conseguiu traduzir em vetor, para o
-/// relatório da prova de conceito.
+/// Registro do que a pintura não conseguiu traduzir em vetor. Vira os
+/// avisos do `PdfBuildResult`.
 class PdfLog {
   final Map<String, int> entries = {};
   void add(String message) => entries.update(message, (n) => n + 1, ifAbsent: () => 1);
@@ -16,34 +17,81 @@ class PdfLog {
 
 /// Imagem a embutir: pixels lidos depois da pintura, porque a leitura é
 /// assíncrona e a pintura do Flutter é síncrona.
+///
+/// O [image] é sempre da lib (um clone do handle do widget, ou uma imagem
+/// criada por rasterização) e é descartado depois da escrita: o `RenderImage`
+/// descarta o handle dele quando a árvore é desmontada, antes de a lib ler
+/// os pixels.
 class PdfPendingImage {
-  PdfPendingImage(this.name, this.image, {this.isTextFallback = false});
+  PdfPendingImage(this.name, this.image, {this.isTextFallback = false, this.interpolate = true});
   final String name;
   final ui.Image image;
   final bool isTextFallback;
+
+  /// Suavizar ao ampliar (`/Interpolate`). Falso quando o Flutter desenha
+  /// com `FilterQuality.none`, que mostra os pixels nítidos.
+  final bool interpolate;
 }
 
-/// Recursos compartilhados entre as páginas: fontes, estados de opacidade e
-/// imagens.
+/// Grupo de transparência: um Form XObject pintado com opacidade e modo de
+/// mistura próprios, como uma camada do Flutter.
+class PdfForm {
+  PdfForm(this.name, this.bbox, this.ops);
+  final String name;
+  final Rect bbox;
+  final String ops;
+}
+
+/// Recursos compartilhados entre as páginas: fontes, estados gráficos,
+/// shadings, imagens e grupos.
 class PdfResources {
   final Map<String, PdfEmbeddedFont> fonts = {};
-  final Map<String, double> alphaStates = {};
+  final Map<String, Map<String, Object>> graphicsStates = {};
+  final Map<String, Map<String, Object>> shadings = {};
   final List<PdfPendingImage> images = [];
-  final Map<ui.Image, String> _imageNames = {};
+  final List<PdfForm> forms = [];
+  final Map<String, String> _graphicsStateNames = {};
 
-  String alphaState(double alpha) {
-    final key = PdfWriter.num(alpha);
-    final name = 'GA${key.replaceAll('.', '_')}';
-    alphaStates[name] = double.parse(key);
+  /// Estado gráfico com opacidade (de preenchimento e de traço) e modo de
+  /// mistura. O modo vai sempre, para que voltar ao normal também seja
+  /// explícito.
+  String graphicsState(double alpha, String blendMode) {
+    final a = PdfWriter.num(alpha);
+    return _graphicsStateNames.putIfAbsent('$a $blendMode', () {
+      final name = 'GS${_graphicsStateNames.length + 1}';
+      final value = double.parse(a);
+      graphicsStates[name] = {'Type': const PdfName('ExtGState'), 'ca': value, 'CA': value, 'BM': PdfName(blendMode)};
+      return name;
+    });
+  }
+
+  String shading(Map<String, Object> dict) {
+    final name = 'Sh${shadings.length + 1}';
+    shadings[name] = dict;
     return name;
   }
 
-  String image(ui.Image image, {bool isTextFallback = false}) {
-    return _imageNames.putIfAbsent(image, () {
-      final name = 'Im${images.length + 1}';
-      images.add(PdfPendingImage(name, image, isTextFallback: isTextFallback));
-      return name;
-    });
+  /// Nome da imagem nos recursos. A mesma imagem (ou outro handle dela)
+  /// entra uma vez só. [created] diz que a imagem foi criada pela lib; as
+  /// outras são clonadas.
+  String image(ui.Image image, {bool created = false, bool isTextFallback = false, bool interpolate = true}) {
+    for (final pending in images) {
+      if (pending.image.isCloneOf(image) && pending.interpolate == interpolate) {
+        if (created) image.dispose();
+        return pending.name;
+      }
+    }
+    final name = 'Im${images.length + 1}';
+    images.add(
+      PdfPendingImage(name, created ? image : image.clone(), isTextFallback: isTextFallback, interpolate: interpolate),
+    );
+    return name;
+  }
+
+  String form(Rect bbox, String ops) {
+    final name = 'Fm${forms.length + 1}';
+    forms.add(PdfForm(name, bbox, ops));
+    return name;
   }
 }
 
@@ -78,14 +126,38 @@ class _Affine {
   }
 
   Float64List toMatrix4() => Float64List.fromList([a, b, 0, 0, c, d, 0, 0, 0, 0, 1, 0, e, f, 0, 1]);
+
+  double get determinant => a * d - b * c;
+
+  /// Quanto uma unidade local mede na página (média dos dois eixos).
+  double get scale => math.sqrt(determinant.abs());
+
+  _Affine? inverse() {
+    final det = determinant;
+    if (det.abs() < 1e-12) return null;
+    return _Affine(d / det, -b / det, -c / det, a / det, (c * f - d * e) / det, (b * e - a * f) / det);
+  }
 }
 
 class _State {
-  _State(this.m, this.alpha, this.emittedAlpha);
+  _State(this.m, this.clip, this.emittedAlpha, this.emittedBlend);
   _Affine m;
-  double alpha;
+
+  /// Caixa envolvente do recorte atual, em coordenadas de página.
+  Rect clip;
   double emittedAlpha;
-  _State copy() => _State(m, alpha, emittedAlpha);
+  String emittedBlend;
+  _State copy() => _State(m, clip, emittedAlpha, emittedBlend);
+}
+
+class _Group {
+  _Group(this.parent, this.alpha, this.blendMode, this.bbox, this.parentAlpha, this.parentBlend);
+  final StringBuffer parent;
+  final double alpha;
+  final String blendMode;
+  final Rect bbox;
+  final double parentAlpha;
+  final String parentBlend;
 }
 
 /// Canvas que escreve operadores PDF em vez de pixels.
@@ -93,52 +165,88 @@ class _State {
 /// As coordenadas são as do Flutter (origem no canto superior esquerdo, Y
 /// para baixo): a página recebe uma inversão de eixo uma vez, no começo do
 /// stream, e o resto do código não pensa mais nisso.
+///
+/// O que tem equivalente em PDF sai em vetor. O que não tem (desfoque, sombra
+/// de elevação, shader de gradiente desconhecido, filtro de cor) é desenhado
+/// só naquele trecho por um `Canvas` de verdade e entra como imagem, com um
+/// aviso no [log].
 class PdfCanvas implements Canvas {
   PdfCanvas(this.resources, this.log, {required this.visibleWindow});
 
   final PdfResources resources;
   final PdfLog log;
 
-  /// Área da página (em coordenadas de página) usada para pular o que não
-  /// aparece nela.
+  /// Área da página (em coordenadas de página) que aparece nela. O que fica
+  /// fora não é pintado.
   final Rect visibleWindow;
 
-  final StringBuffer ops = StringBuffer();
+  /// Pixels por ponto das rasterizações, na escala 1 da página.
+  static const rasterDensity = 3.0;
+
+  /// Limite de pixels de uma rasterização; acima dele a densidade cai.
+  static const maxRasterPixels = 4000000;
+
+  static const _unbounded = Rect.fromLTRB(-1e5, -1e5, 1e5, 1e5);
+
+  StringBuffer _ops = StringBuffer();
   final List<_State> _stack = [];
-  _State _s = _State(_Affine.identity, 1, 1);
+  final List<_Group> _groups = [];
+
+  /// Profundidade da pilha em que cada `saveLayer` abriu um grupo.
+  final List<int> _layerDepths = [];
+  _State _s = _State(_Affine.identity, _unbounded, 1, 'Normal');
+
+  /// Gradiente da decoração que está sendo pintada (ver [PdfGradientHint]).
+  /// A primeira pintura com shader o consome.
+  PdfGradientHint? pendingGradient;
+
+  /// Quanto um desfoque (`MaskFilter.blur`) pode se espalhar além da forma.
+  /// O shader de desfoque é opaco; o `PdfPaintingContext` ajusta este valor
+  /// pelas sombras da decoração.
+  double blurOutset = 16;
+
+  /// Operadores da página (ou do grupo aberto).
+  StringBuffer get ops => _ops;
 
   static String _n(double v) => PdfWriter.num(v);
 
   // ---------------------------------------------------------------- estado
 
-  /// Multiplica a opacidade de tudo que for pintado até o próximo restore
-  /// (usado para as camadas de opacidade do Flutter).
-  void multiplyAlpha(double alpha) => _s.alpha *= alpha;
+  bool isVisible(Rect localRect) {
+    final r = _s.m.applyRect(localRect);
+    return r.overlaps(visibleWindow) && r.overlaps(_s.clip);
+  }
 
-  bool isVisible(Rect localRect) => _s.m.applyRect(localRect).overlaps(visibleWindow);
-
-  void writeRaw(String s) => ops.write(s);
+  void writeRaw(String s) => _ops.write(s);
 
   @override
   void save() {
     _stack.add(_s.copy());
-    ops.write('q\n');
+    _ops.write('q\n');
   }
 
   @override
   void saveLayer(Rect? bounds, Paint paint) {
     save();
-    if (paint.blendMode != BlendMode.srcOver || paint.colorFilter != null || paint.imageFilter != null) {
-      log.add('saveLayer com efeito (${paint.blendMode.name}); pintado sem o efeito');
+    if (paint.colorFilter != null || paint.imageFilter != null) {
+      log.add('saveLayer com filtro de cor ou de imagem; pintado sem o filtro');
     }
-    multiplyAlpha(paint.color.a);
+    final blend = _blendMode(paint.blendMode, paint.color.a);
+    if (paint.color.a < 1 || blend != 'Normal') {
+      beginGroup(alpha: paint.color.a, blendMode: blend);
+      _layerDepths.add(_stack.length);
+    }
   }
 
   @override
   void restore() {
     if (_stack.isEmpty) return;
+    if (_layerDepths.isNotEmpty && _layerDepths.last == _stack.length) {
+      _layerDepths.removeLast();
+      endGroup();
+    }
     _s = _stack.removeLast();
-    ops.write('Q\n');
+    _ops.write('Q\n');
   }
 
   @override
@@ -151,9 +259,33 @@ class PdfCanvas implements Canvas {
   @override
   int getSaveCount() => _stack.length + 1;
 
+  /// Abre um grupo de transparência: tudo até [endGroup] é composto junto e
+  /// só depois recebe [alpha] e [blendMode], como uma camada do Flutter. Com
+  /// opacidade aplicada objeto a objeto, um fundo apareceria através do
+  /// texto pintado em cima dele.
+  void beginGroup({double alpha = 1, String blendMode = 'Normal'}) {
+    _groups.add(_Group(_ops, alpha.clamp(0.0, 1.0), blendMode, getLocalClipBounds(), _s.emittedAlpha, _s.emittedBlend));
+    _ops = StringBuffer();
+    // Dentro do grupo, opacidade e mistura começam nos valores iniciais.
+    _s.emittedAlpha = 1;
+    _s.emittedBlend = 'Normal';
+  }
+
+  void endGroup() {
+    final group = _groups.removeLast();
+    final content = _ops.toString();
+    _ops = group.parent;
+    _s.emittedAlpha = group.parentAlpha;
+    _s.emittedBlend = group.parentBlend;
+    if (content.isEmpty || group.alpha == 0 || group.bbox.isEmpty) return;
+    final form = resources.form(group.bbox, content);
+    final gs = resources.graphicsState(group.alpha, group.blendMode);
+    _ops.write('q /$gs gs /$form Do Q\n');
+  }
+
   void _concat(_Affine m) {
     _s.m = _s.m.times(m);
-    ops.write('${_n(m.a)} ${_n(m.b)} ${_n(m.c)} ${_n(m.d)} ${_n(m.e)} ${_n(m.f)} cm\n');
+    _ops.write('${_n(m.a)} ${_n(m.b)} ${_n(m.c)} ${_n(m.d)} ${_n(m.e)} ${_n(m.f)} cm\n');
   }
 
   @override
@@ -181,86 +313,233 @@ class PdfCanvas implements Canvas {
   Float64List getTransform() => _s.m.toMatrix4();
 
   @override
-  Rect getLocalClipBounds() => const Rect.fromLTRB(-1e5, -1e5, 1e5, 1e5);
+  Rect getDestinationClipBounds() {
+    final r = _s.clip.intersect(visibleWindow);
+    return r.width <= 0 || r.height <= 0 ? Rect.zero : r;
+  }
 
   @override
-  Rect getDestinationClipBounds() => const Rect.fromLTRB(-1e5, -1e5, 1e5, 1e5);
+  Rect getLocalClipBounds() {
+    final destination = getDestinationClipBounds();
+    final inverse = _s.m.inverse();
+    if (destination.isEmpty || inverse == null) return Rect.zero;
+    return inverse.applyRect(destination);
+  }
 
   // ---------------------------------------------------------------- recorte
+
+  void _intersectClip(Rect localBounds) {
+    _s.clip = _s.clip.intersect(_s.m.applyRect(localBounds));
+  }
+
+  void _clipCurrentPath(Rect localBounds, {bool evenOdd = false}) {
+    _ops.write(evenOdd ? 'W* n\n' : 'W n\n');
+    _intersectClip(localBounds);
+  }
 
   @override
   void clipRect(Rect rect, {ui.ClipOp clipOp = ui.ClipOp.intersect, bool doAntiAlias = true}) {
     if (clipOp == ui.ClipOp.difference) {
-      log.add('clipRect com ClipOp.difference ignorado');
+      // Tudo menos o retângulo: par-ímpar entre um retângulo enorme e ele.
+      final all = getLocalClipBounds().inflate(1);
+      _rect(all);
+      _rect(rect);
+      _ops.write('W* n\n');
       return;
     }
-    ops.write('${_n(rect.left)} ${_n(rect.top)} ${_n(rect.width)} ${_n(rect.height)} re W n\n');
+    _rect(rect);
+    _clipCurrentPath(rect);
   }
 
   @override
   void clipRRect(RRect rrect, {bool doAntiAlias = true}) {
     _rrectPath(rrect);
-    ops.write('W n\n');
+    _clipCurrentPath(rrect.outerRect);
   }
 
   @override
-  void clipRSuperellipse(ui.RSuperellipse rsuperellipse, {bool doAntiAlias = true}) {
-    log.add('RSuperellipse aproximado por retângulo arredondado');
-    clipRRect(
-      RRect.fromLTRBAndCorners(
-        rsuperellipse.left,
-        rsuperellipse.top,
-        rsuperellipse.right,
-        rsuperellipse.bottom,
-        topLeft: rsuperellipse.tlRadius,
-        topRight: rsuperellipse.trRadius,
-        bottomLeft: rsuperellipse.blRadius,
-        bottomRight: rsuperellipse.brRadius,
-      ),
-    );
-  }
+  void clipRSuperellipse(ui.RSuperellipse rsuperellipse, {bool doAntiAlias = true}) =>
+      clipPath(Path()..addRSuperellipse(rsuperellipse));
 
   @override
   void clipPath(Path path, {bool doAntiAlias = true}) {
     _samplePath(path);
-    ops.write(path.fillType == PathFillType.evenOdd ? 'W* n\n' : 'W n\n');
+    _clipCurrentPath(path.getBounds(), evenOdd: path.fillType == PathFillType.evenOdd);
   }
 
   // ---------------------------------------------------------------- tinta
 
-  void _alpha(double a) {
-    final alpha = (a * _s.alpha).clamp(0.0, 1.0);
-    if ((alpha - _s.emittedAlpha).abs() < 0.001) return;
-    ops.write('/${resources.alphaState(alpha)} gs\n');
-    _s.emittedAlpha = alpha;
+  static const _pdfBlendModes = {
+    BlendMode.srcOver: 'Normal',
+    BlendMode.multiply: 'Multiply',
+    BlendMode.screen: 'Screen',
+    BlendMode.overlay: 'Overlay',
+    BlendMode.darken: 'Darken',
+    BlendMode.lighten: 'Lighten',
+    BlendMode.colorDodge: 'ColorDodge',
+    BlendMode.colorBurn: 'ColorBurn',
+    BlendMode.hardLight: 'HardLight',
+    BlendMode.softLight: 'SoftLight',
+    BlendMode.difference: 'Difference',
+    BlendMode.exclusion: 'Exclusion',
+    BlendMode.hue: 'Hue',
+    BlendMode.saturation: 'Saturation',
+    BlendMode.color: 'Color',
+    BlendMode.luminosity: 'Luminosity',
+  };
+
+  /// Nome PDF do modo de mistura. Os modos de Porter-Duff (`dstIn`, `xor`...)
+  /// não existem em PDF e viram `srcOver`, com aviso.
+  String _blendMode(BlendMode mode, double alpha) {
+    final name = _pdfBlendModes[mode];
+    if (name != null) return name;
+    // `src` com cor opaca dá o mesmo resultado que `srcOver`.
+    if (mode == BlendMode.src && alpha >= 1) return 'Normal';
+    log.add('BlendMode ${mode.name} sem equivalente em PDF; tratado como srcOver');
+    return 'Normal';
+  }
+
+  void _graphicsState(double alpha, String blendMode) {
+    final a = alpha.clamp(0.0, 1.0);
+    if ((a - _s.emittedAlpha).abs() < 0.001 && blendMode == _s.emittedBlend) return;
+    _ops.write('/${resources.graphicsState(a, blendMode)} gs\n');
+    _s.emittedAlpha = a;
+    _s.emittedBlend = blendMode;
   }
 
   String _rgb(Color c) => '${_n(c.r.clamp(0, 1))} ${_n(c.g.clamp(0, 1))} ${_n(c.b.clamp(0, 1))}';
 
-  /// Prepara cor e linha da tinta e devolve o operador de pintura do
-  /// caminho.
-  String _applyPaint(Paint paint, {bool evenOdd = false}) {
-    if (paint.shader != null) log.add('Paint com shader (gradiente) pintado com cor sólida');
-    if (paint.maskFilter != null) log.add('Paint com maskFilter (blur) pintado sem o efeito');
-    if (paint.blendMode != BlendMode.srcOver) log.add('BlendMode ${paint.blendMode.name} tratado como srcOver');
-    _alpha(paint.color.a);
-    if (paint.style == PaintingStyle.stroke) {
-      ops.write(
+  static Paint _copy(Paint p, PaintingStyle style) => Paint()
+    ..color = p.color
+    ..blendMode = p.blendMode
+    ..style = style
+    ..strokeWidth = p.strokeWidth
+    ..strokeCap = p.strokeCap
+    ..strokeJoin = p.strokeJoin
+    ..strokeMiterLimit = p.strokeMiterLimit
+    ..shader = p.shader
+    ..maskFilter = p.maskFilter
+    ..colorFilter = p.colorFilter
+    ..imageFilter = p.imageFilter
+    ..invertColors = p.invertColors
+    ..filterQuality = p.filterQuality
+    ..isAntiAlias = p.isAntiAlias;
+
+  /// Desenha uma forma. [path] escreve o caminho em PDF; [draw] desenha a
+  /// mesma forma num `Canvas` de verdade, para quando é preciso rasterizar.
+  void _shape(Paint paint, Rect bounds, void Function() path, void Function(Canvas c) draw, {bool evenOdd = false}) {
+    final stroke = paint.style == PaintingStyle.stroke;
+    final outset = stroke ? paint.strokeWidth * 2 + 1 : 1.0;
+    final blend = _blendMode(paint.blendMode, paint.color.a);
+    if (paint.maskFilter != null || paint.imageFilter != null) {
+      _raster(bounds.inflate(outset + blurOutset), draw, density: 2, blendMode: blend, reason: 'desfoque rasterizado');
+      return;
+    }
+    if (paint.colorFilter != null || paint.invertColors) {
+      _raster(bounds.inflate(outset), draw, blendMode: blend, reason: 'Paint com filtro de cor rasterizado');
+      return;
+    }
+    if (paint.shader != null) {
+      if (stroke) {
+        _raster(bounds.inflate(outset), draw, blendMode: blend, reason: 'traço com shader (gradiente) rasterizado');
+        return;
+      }
+      final hint = pendingGradient;
+      pendingGradient = null;
+      final shading = hint == null ? null : PdfShading.from(hint);
+      save();
+      path();
+      _clipCurrentPath(bounds, evenOdd: evenOdd);
+      if (shading != null) {
+        _graphicsState(shading.alpha * paint.color.a, blend);
+        if (shading.transform != null) transform(shading.transform!);
+        _ops.write('/${resources.shading(shading.dict)} sh\n');
+      } else {
+        // O interior vem do Flutter; a borda continua sendo o caminho vetorial.
+        _raster(
+          bounds,
+          (c) => c.drawRect(bounds, paint),
+          blendMode: blend,
+          reason: hint == null
+              ? 'shader sem gradiente conhecido rasterizado'
+              : 'gradiente sem equivalente em PDF rasterizado',
+        );
+      }
+      restore();
+      return;
+    }
+    _graphicsState(paint.color.a, blend);
+    final String op;
+    if (stroke) {
+      _ops.write(
         '${_rgb(paint.color)} RG ${_n(paint.strokeWidth)} w '
         '${paint.strokeCap.index} J ${paint.strokeJoin.index} j ${_n(paint.strokeMiterLimit)} M\n',
       );
-      return 'S';
+      op = 'S';
+    } else {
+      _ops.write('${_rgb(paint.color)} rg\n');
+      op = evenOdd ? 'f*' : 'f';
     }
-    ops.write('${_rgb(paint.color)} rg\n');
-    return evenOdd ? 'f*' : 'f';
+    path();
+    _ops.write('$op\n');
+  }
+
+  /// Escala (pixels por unidade local) de uma rasterização de [area].
+  double rasterScale(Rect area, {double density = rasterDensity}) {
+    var scale = density * math.max(_s.m.scale, 1e-6);
+    final pixels = area.width * area.height * scale * scale;
+    if (pixels > maxRasterPixels) scale *= math.sqrt(maxRasterPixels / pixels);
+    return scale;
+  }
+
+  /// Desenha [draw] num `Canvas` de verdade, só dentro de [bounds] (cortado
+  /// pelo recorte atual), e põe o resultado na página como imagem.
+  void _raster(
+    Rect bounds,
+    void Function(Canvas c) draw, {
+    required String reason,
+    double density = rasterDensity,
+    double? pixelsPerUnit,
+    String blendMode = 'Normal',
+  }) {
+    final area = bounds.intersect(getLocalClipBounds());
+    if (area.width <= 0 || area.height <= 0) return;
+    var scale = pixelsPerUnit ?? rasterScale(area, density: density);
+    final pixels = area.width * area.height * scale * scale;
+    if (pixels > maxRasterPixels) scale *= math.sqrt(maxRasterPixels / pixels);
+    final w = math.max(1, (area.width * scale).ceil());
+    final h = math.max(1, (area.height * scale).ceil());
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder)
+      ..scale(scale)
+      ..translate(-area.left, -area.top);
+    draw(canvas);
+    final picture = recorder.endRecording();
+    final image = picture.toImageSync(w, h);
+    picture.dispose();
+    log.add(reason);
+    drawRasterImage(image, Rect.fromLTWH(area.left, area.top, w / scale, h / scale), blendMode: blendMode);
+  }
+
+  /// Desenha uma imagem criada pela lib; ela é descartada depois que o
+  /// arquivo é escrito.
+  void drawRasterImage(ui.Image image, Rect dst, {String blendMode = 'Normal', bool isTextFallback = false}) {
+    final name = resources.image(image, created: true, isTextFallback: isTextFallback);
+    _graphicsState(1, blendMode);
+    _placeImage(name, dst);
+  }
+
+  void _placeImage(String name, Rect dst) {
+    _ops.write('q ${_n(dst.width)} 0 0 ${_n(-dst.height)} ${_n(dst.left)} ${_n(dst.bottom)} cm /$name Do Q\n');
   }
 
   // ---------------------------------------------------------------- caminhos
 
-  void _m(double x, double y) => ops.write('${_n(x)} ${_n(y)} m\n');
-  void _l(double x, double y) => ops.write('${_n(x)} ${_n(y)} l\n');
+  void _m(double x, double y) => _ops.write('${_n(x)} ${_n(y)} m\n');
+  void _l(double x, double y) => _ops.write('${_n(x)} ${_n(y)} l\n');
   void _c(double x1, double y1, double x2, double y2, double x3, double y3) =>
-      ops.write('${_n(x1)} ${_n(y1)} ${_n(x2)} ${_n(y2)} ${_n(x3)} ${_n(y3)} c\n');
+      _ops.write('${_n(x1)} ${_n(y1)} ${_n(x2)} ${_n(y2)} ${_n(x3)} ${_n(y3)} c\n');
+  void _rect(Rect r) => _ops.write('${_n(r.left)} ${_n(r.top)} ${_n(r.width)} ${_n(r.height)} re\n');
 
   static const _k = 0.5522847498;
 
@@ -283,7 +562,7 @@ class PdfCanvas implements Canvas {
     if (tl != Radius.zero) {
       _c(r.left, r.top + tl.y - tl.y * _k, r.left + tl.x - tl.x * _k, r.top, r.left + tl.x, r.top);
     }
-    ops.write('h\n');
+    _ops.write('h\n');
   }
 
   void _arcSegments(Rect oval, double start, double sweep, {required bool moveToStart}) {
@@ -315,7 +594,7 @@ class PdfCanvas implements Canvas {
 
   void _ovalPath(Rect r) {
     _arcSegments(r, 0, 2 * math.pi, moveToStart: true);
-    ops.write('h\n');
+    _ops.write('h\n');
   }
 
   /// O `dart:ui` não expõe os segmentos de um [Path]: o caminho é amostrado
@@ -337,7 +616,7 @@ class PdfCanvas implements Canvas {
       for (final p in simplified.skip(1)) {
         _l(p.dx, p.dy);
       }
-      if (metric.isClosed) ops.write('h\n');
+      if (metric.isClosed) _ops.write('h\n');
     }
   }
 
@@ -386,103 +665,82 @@ class PdfCanvas implements Canvas {
 
   @override
   void drawPaint(Paint paint) {
-    final op = _applyPaint(
-      Paint()
-        ..color = paint.color
-        ..shader = paint.shader
-        ..blendMode = paint.blendMode,
-    );
-    ops.write('-100000 -100000 200000 200000 re $op\n');
+    final area = getLocalClipBounds();
+    if (area.isEmpty) return;
+    _shape(_copy(paint, PaintingStyle.fill), area, () => _rect(area), (c) => c.drawPaint(paint));
   }
 
   @override
   void drawLine(Offset p1, Offset p2, Paint paint) {
-    final stroke = Paint()
-      ..color = paint.color
-      ..strokeWidth = paint.strokeWidth
-      ..strokeCap = paint.strokeCap
-      ..style = PaintingStyle.stroke;
-    _applyPaint(stroke);
-    _m(p1.dx, p1.dy);
-    _l(p2.dx, p2.dy);
-    ops.write('S\n');
+    _shape(_copy(paint, PaintingStyle.stroke), Rect.fromPoints(p1, p2), () {
+      _m(p1.dx, p1.dy);
+      _l(p2.dx, p2.dy);
+    }, (c) => c.drawLine(p1, p2, paint));
   }
 
   @override
-  void drawRect(Rect rect, Paint paint) {
-    final op = _applyPaint(paint);
-    ops.write('${_n(rect.left)} ${_n(rect.top)} ${_n(rect.width)} ${_n(rect.height)} re $op\n');
-  }
+  void drawRect(Rect rect, Paint paint) => _shape(paint, rect, () => _rect(rect), (c) => c.drawRect(rect, paint));
 
   @override
-  void drawRRect(RRect rrect, Paint paint) {
-    final op = _applyPaint(paint);
-    _rrectPath(rrect);
-    ops.write('$op\n');
-  }
+  void drawRRect(RRect rrect, Paint paint) =>
+      _shape(paint, rrect.outerRect, () => _rrectPath(rrect), (c) => c.drawRRect(rrect, paint));
 
   @override
   void drawDRRect(RRect outer, RRect inner, Paint paint) {
-    final op = _applyPaint(paint, evenOdd: true);
-    _rrectPath(outer);
-    _rrectPath(inner);
-    ops.write('$op\n');
-  }
-
-  @override
-  void drawRSuperellipse(ui.RSuperellipse rsuperellipse, Paint paint) {
-    log.add('RSuperellipse aproximado por retângulo arredondado');
-    drawRRect(
-      RRect.fromLTRBAndCorners(
-        rsuperellipse.left,
-        rsuperellipse.top,
-        rsuperellipse.right,
-        rsuperellipse.bottom,
-        topLeft: rsuperellipse.tlRadius,
-        topRight: rsuperellipse.trRadius,
-        bottomLeft: rsuperellipse.blRadius,
-        bottomRight: rsuperellipse.brRadius,
-      ),
+    _shape(
       paint,
+      outer.outerRect,
+      () {
+        _rrectPath(outer);
+        _rrectPath(inner);
+      },
+      (c) => c.drawDRRect(outer, inner, paint),
+      evenOdd: true,
     );
   }
 
   @override
-  void drawOval(Rect rect, Paint paint) {
-    final op = _applyPaint(paint);
-    _ovalPath(rect);
-    ops.write('$op\n');
-  }
+  void drawRSuperellipse(ui.RSuperellipse rsuperellipse, Paint paint) =>
+      drawPath(Path()..addRSuperellipse(rsuperellipse), paint);
+
+  @override
+  void drawOval(Rect rect, Paint paint) => _shape(paint, rect, () => _ovalPath(rect), (c) => c.drawOval(rect, paint));
 
   @override
   void drawCircle(Offset c, double radius, Paint paint) => drawOval(Rect.fromCircle(center: c, radius: radius), paint);
 
   @override
   void drawArc(Rect rect, double startAngle, double sweepAngle, bool useCenter, Paint paint) {
-    final op = _applyPaint(paint);
-    if (useCenter) {
-      _m(rect.center.dx, rect.center.dy);
-      _arcSegments(rect, startAngle, sweepAngle, moveToStart: false);
-      ops.write('h\n');
-    } else {
-      _arcSegments(rect, startAngle, sweepAngle, moveToStart: true);
-    }
-    ops.write('$op\n');
+    _shape(paint, rect, () {
+      if (useCenter) {
+        _m(rect.center.dx, rect.center.dy);
+        _arcSegments(rect, startAngle, sweepAngle, moveToStart: false);
+        _ops.write('h\n');
+      } else {
+        _arcSegments(rect, startAngle, sweepAngle, moveToStart: true);
+      }
+    }, (c) => c.drawArc(rect, startAngle, sweepAngle, useCenter, paint));
   }
 
   @override
   void drawPath(Path path, Paint paint) {
-    final op = _applyPaint(paint, evenOdd: path.fillType == PathFillType.evenOdd);
-    _samplePath(path);
-    ops.write('$op\n');
+    _shape(
+      paint,
+      path.getBounds(),
+      () => _samplePath(path),
+      (c) => c.drawPath(path, paint),
+      evenOdd: path.fillType == PathFillType.evenOdd,
+    );
   }
 
   @override
   void drawPoints(ui.PointMode pointMode, List<Offset> points, Paint paint) {
     switch (pointMode) {
       case ui.PointMode.points:
+        // Cada ponto é um quadrado (ou um círculo, com ponta redonda) do
+        // tamanho da espessura da linha, qualquer que seja o estilo.
         final r = math.max(paint.strokeWidth, 1) / 2;
-        final dot = Paint()..color = paint.color;
+        final dot = _copy(paint, PaintingStyle.fill);
         for (final p in points) {
           if (paint.strokeCap == StrokeCap.round) {
             drawCircle(p, r, dot);
@@ -496,17 +754,16 @@ class PdfCanvas implements Canvas {
         }
       case ui.PointMode.polygon:
         if (points.length < 2) return;
-        _applyPaint(
-          Paint()
-            ..color = paint.color
-            ..strokeWidth = paint.strokeWidth
-            ..style = PaintingStyle.stroke,
-        );
-        _m(points.first.dx, points.first.dy);
-        for (final p in points.skip(1)) {
-          _l(p.dx, p.dy);
+        var bounds = Rect.fromPoints(points.first, points.first);
+        for (final p in points) {
+          bounds = bounds.expandToInclude(Rect.fromPoints(p, p));
         }
-        ops.write('S\n');
+        _shape(_copy(paint, PaintingStyle.stroke), bounds, () {
+          _m(points.first.dx, points.first.dy);
+          for (final p in points.skip(1)) {
+            _l(p.dx, p.dy);
+          }
+        }, (c) => c.drawPoints(pointMode, points, paint));
     }
   }
 
@@ -515,33 +772,144 @@ class PdfCanvas implements Canvas {
     drawPoints(pointMode, [for (var i = 0; i + 1 < points.length; i += 2) Offset(points[i], points[i + 1])], paint);
   }
 
+  @override
+  void drawShadow(Path path, Color color, double elevation, bool transparentOccluder) {
+    if (elevation <= 0 || color.a == 0) return;
+    // A sombra é um desfoque calculado pelo Flutter: rasterizada em volta da
+    // forma, com folga para o espalhamento.
+    _raster(
+      path.getBounds().inflate(elevation * 3 + 2),
+      (c) => c.drawShadow(path, color, elevation, transparentOccluder),
+      density: 2,
+      reason: 'sombra de elevação (drawShadow) rasterizada',
+    );
+  }
+
   // ---------------------------------------------------------------- imagens
 
-  void drawImageInRect(ui.Image image, Rect dst, {bool isTextFallback = false}) {
-    final name = resources.image(image, isTextFallback: isTextFallback);
-    _alpha(1);
-    ops.write('q ${_n(dst.width)} 0 0 ${_n(-dst.height)} ${_n(dst.left)} ${_n(dst.bottom)} cm /$name Do Q\n');
+  /// Imagem inteira esticada em [dst], com a opacidade da tinta.
+  void _imageInRect(ui.Image image, Rect dst, Paint paint) {
+    final name = resources.image(image, interpolate: paint.filterQuality != FilterQuality.none);
+    _graphicsState(paint.color.a, _blendMode(paint.blendMode, paint.color.a));
+    _placeImage(name, dst);
   }
 
-  @override
-  void drawImage(ui.Image image, Offset offset, Paint paint) {
-    drawImageInRect(image, Rect.fromLTWH(offset.dx, offset.dy, image.width.toDouble(), image.height.toDouble()));
-  }
-
-  @override
-  void drawImageRect(ui.Image image, Rect src, Rect dst, Paint paint) {
+  void _image(ui.Image image, Rect src, Rect dst, Paint paint, void Function(Canvas c) draw) {
+    if (src.isEmpty || dst.width <= 0 || dst.height <= 0) return;
+    if (paint.colorFilter != null ||
+        paint.maskFilter != null ||
+        paint.imageFilter != null ||
+        paint.shader != null ||
+        paint.invertColors) {
+      // Na resolução da própria imagem.
+      final ppu = math.max(src.width / dst.width.abs(), src.height / dst.height.abs()) * _s.m.scale;
+      _raster(
+        dst,
+        draw,
+        pixelsPerUnit: math.max(ppu, 1),
+        blendMode: _blendMode(paint.blendMode, paint.color.a),
+        reason: 'imagem com filtro rasterizada',
+      );
+      return;
+    }
+    final full = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
+    if (src == full) {
+      _imageInRect(image, dst, paint);
+      return;
+    }
     final sx = dst.width / src.width, sy = dst.height / src.height;
-    final full = Rect.fromLTWH(dst.left - src.left * sx, dst.top - src.top * sy, image.width * sx, image.height * sy);
     save();
     clipRect(dst);
-    drawImageInRect(image, full);
+    _imageInRect(
+      image,
+      Rect.fromLTWH(dst.left - src.left * sx, dst.top - src.top * sy, image.width * sx, image.height * sy),
+      paint,
+    );
     restore();
   }
 
   @override
+  void drawImage(ui.Image image, Offset offset, Paint paint) {
+    final src = Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble());
+    _image(image, src, src.shift(offset), paint, (c) => c.drawImage(image, offset, paint));
+  }
+
+  @override
+  void drawImageRect(ui.Image image, Rect src, Rect dst, Paint paint) {
+    _image(image, src, dst, paint, (c) => c.drawImageRect(image, src, dst, paint));
+  }
+
+  /// Nove partes: os cantos ficam no tamanho original, as bordas esticam num
+  /// sentido e o centro nos dois. Se o destino é menor que os cantos, eles
+  /// encolhem na mesma proporção.
+  @override
   void drawImageNine(ui.Image image, Rect center, Rect dst, Paint paint) {
-    log.add('drawImageNine desenhado como imagem esticada');
-    drawImageRect(image, Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()), dst, paint);
+    final iw = image.width.toDouble(), ih = image.height.toDouble();
+    final left = center.left, right = iw - center.right, top = center.top, bottom = ih - center.bottom;
+    final kx = left + right > dst.width ? dst.width / (left + right) : 1.0;
+    final ky = top + bottom > dst.height ? dst.height / (top + bottom) : 1.0;
+    final sx = [0.0, center.left, center.right, iw];
+    final sy = [0.0, center.top, center.bottom, ih];
+    final dx = [dst.left, dst.left + left * kx, dst.right - right * kx, dst.right];
+    final dy = [dst.top, dst.top + top * ky, dst.bottom - bottom * ky, dst.bottom];
+    for (var j = 0; j < 3; j++) {
+      for (var i = 0; i < 3; i++) {
+        final s = Rect.fromLTRB(sx[i], sy[j], sx[i + 1], sy[j + 1]);
+        final d = Rect.fromLTRB(dx[i], dy[j], dx[i + 1], dy[j + 1]);
+        if (s.width <= 0 || s.height <= 0 || d.width <= 0 || d.height <= 0) continue;
+        drawImageRect(image, s, d, paint);
+      }
+    }
+  }
+
+  @override
+  void drawAtlas(
+    ui.Image atlas,
+    List<RSTransform> transforms,
+    List<Rect> rects,
+    List<Color>? colors,
+    BlendMode? blendMode,
+    Rect? cullRect,
+    Paint paint,
+  ) {
+    if (colors != null && colors.isNotEmpty) log.add('drawAtlas com cores: pintado sem as cores');
+    for (var i = 0; i < math.min(transforms.length, rects.length); i++) {
+      final t = transforms[i], r = rects[i];
+      save();
+      _concat(_Affine(t.scos, t.ssin, -t.ssin, t.scos, t.tx, t.ty));
+      drawImageRect(atlas, r, Rect.fromLTWH(0, 0, r.width, r.height), paint);
+      restore();
+    }
+  }
+
+  @override
+  void drawRawAtlas(
+    ui.Image atlas,
+    Float32List rstTransforms,
+    Float32List rects,
+    Int32List? colors,
+    BlendMode? blendMode,
+    Rect? cullRect,
+    Paint paint,
+  ) {
+    final n = math.min(rstTransforms.length, rects.length) ~/ 4;
+    drawAtlas(
+      atlas,
+      [
+        for (var i = 0; i < n; i++)
+          RSTransform(
+            rstTransforms[i * 4],
+            rstTransforms[i * 4 + 1],
+            rstTransforms[i * 4 + 2],
+            rstTransforms[i * 4 + 3],
+          ),
+      ],
+      [for (var i = 0; i < n; i++) Rect.fromLTRB(rects[i * 4], rects[i * 4 + 1], rects[i * 4 + 2], rects[i * 4 + 3])],
+      colors == null ? null : [for (final c in colors) Color(c)],
+      blendMode,
+      cullRect,
+      paint,
+    );
   }
 
   /// O texto de um [ui.Paragraph] não pode ser lido: o trecho é rasterizado
@@ -555,9 +923,11 @@ class PdfCanvas implements Canvas {
     final recorder = ui.PictureRecorder();
     final c = Canvas(recorder)..scale(k);
     c.drawParagraph(paragraph, Offset.zero);
-    final img = recorder.endRecording().toImageSync((w * k).ceil(), (h * k).ceil());
+    final picture = recorder.endRecording();
+    final img = picture.toImageSync((w * k).ceil(), (h * k).ceil());
+    picture.dispose();
     log.add('texto pintado por painter (drawParagraph) rasterizado');
-    drawImageInRect(img, Rect.fromLTWH(offset.dx, offset.dy, w, h), isTextFallback: true);
+    drawRasterImage(img, Rect.fromLTWH(offset.dx, offset.dy, w, h), isTextFallback: true);
   }
 
   // ---------------------------------------------------------------- texto real
@@ -574,7 +944,7 @@ class PdfCanvas implements Canvas {
     required List<double> xs,
   }) {
     if (glyphs.isEmpty) return;
-    _alpha(color.a);
+    _graphicsState(color.a, 'Normal');
     final tj = StringBuffer('[<');
     for (var i = 0; i < glyphs.length; i++) {
       if (i > 0) {
@@ -585,7 +955,7 @@ class PdfCanvas implements Canvas {
       tj.write(glyphs[i].toRadixString(16).padLeft(4, '0'));
     }
     tj.write('>]');
-    ops.write(
+    _ops.write(
       'BT /${font.resourceName} ${_n(fontSize)} Tf ${_rgb(color)} rg '
       '1 0 0 -1 ${_n(xs.first)} ${_n(baseline)} Tm $tj TJ ET\n',
     );
@@ -597,33 +967,7 @@ class PdfCanvas implements Canvas {
   void drawPicture(ui.Picture picture) => log.add('drawPicture ignorado (Picture é opaco)');
 
   @override
-  void drawShadow(Path path, Color color, double elevation, bool transparentOccluder) =>
-      log.add('drawShadow (sombra de elevação) ignorado');
-
-  @override
   void drawVertices(ui.Vertices vertices, BlendMode blendMode, Paint paint) => log.add('drawVertices ignorado');
-
-  @override
-  void drawAtlas(
-    ui.Image atlas,
-    List<RSTransform> transforms,
-    List<Rect> rects,
-    List<Color>? colors,
-    BlendMode? blendMode,
-    Rect? cullRect,
-    Paint paint,
-  ) => log.add('drawAtlas ignorado');
-
-  @override
-  void drawRawAtlas(
-    ui.Image atlas,
-    Float32List rstTransforms,
-    Float32List rects,
-    Int32List? colors,
-    BlendMode? blendMode,
-    Rect? cullRect,
-    Paint paint,
-  ) => log.add('drawRawAtlas ignorado');
 
   @override
   dynamic noSuchMethod(Invocation invocation) {

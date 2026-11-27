@@ -46,6 +46,15 @@ class PdfInspector {
     return [for (final p in pages) streams[int.parse(RegExp(r'/Contents (\d+) 0 R').firstMatch(p.value)!.group(1)!)]!];
   }
 
+  /// Operadores dos grupos de transparência (Form XObjects).
+  List<String> get formContents => [
+    for (final e in objects.entries)
+      if (e.value.contains('/Subtype /Form')) streams[e.key]!,
+  ];
+
+  /// Tudo o que é desenhado: páginas e grupos.
+  String get allContents => [...pageContents, ...formContents].join('\n');
+
   int get imageCount => objects.values.where((d) => d.contains('/Subtype /Image') && d.contains('/DeviceRGB')).length;
 
   /// Textos mapeados no `ToUnicode` das fontes, para conferir que um

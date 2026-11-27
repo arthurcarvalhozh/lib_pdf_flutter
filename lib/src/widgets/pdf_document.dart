@@ -128,7 +128,9 @@ class PdfDocument {
           ..save()
           ..clipRect(window)
           ..translate(margin.left, margin.top - start);
-        PdfPaintingContext(canvas, paragraphs, log, Offset.zero & root.size).paintChild(root, Offset.zero);
+        PdfPaintingContext(canvas, paragraphs, log, Offset.zero & root.size)
+          ..paintChild(root, Offset.zero)
+          ..dispose();
         canvas.restore();
         pageOps.add((spec, canvas.ops.toString()));
       }
@@ -143,21 +145,29 @@ class PdfDocument {
     final w = PdfWriter();
     final catalog = w.reserve();
     final pagesRef = w.reserve();
+    final resourcesRef = w.reserve();
     final fontRefs = <String, Object>{for (final e in resources.fonts.entries) e.key: e.value.write(w)};
     final xobjects = <String, Object>{};
     for (final pending in resources.images) {
-      xobjects[pending.name] = await writeImage(w, pending.image);
-      // Só as imagens criadas pela lib são dela para descartar; as dos
-      // widgets pertencem ao cache de imagens do Flutter.
-      if (pending.isTextFallback) pending.image.dispose();
+      xobjects[pending.name] = await writeImage(w, pending.image, interpolate: pending.interpolate);
+      // Clones e imagens criadas pela lib: são dela para descartar.
+      pending.image.dispose();
     }
-    final gstates = <String, Object>{
-      for (final e in resources.alphaStates.entries)
-        e.key: <String, Object>{'Type': const PdfName('ExtGState'), 'ca': e.value, 'CA': e.value},
-    };
-    final resourcesRef = w.add(<String, Object>{
+    // Grupos de transparência: usam os mesmos recursos das páginas.
+    for (final form in resources.forms) {
+      final b = form.bbox;
+      xobjects[form.name] = w.addStream({
+        'Type': const PdfName('XObject'),
+        'Subtype': const PdfName('Form'),
+        'BBox': [b.left, b.top, b.right, b.bottom],
+        'Group': <String, Object>{'Type': const PdfName('Group'), 'S': const PdfName('Transparency')},
+        'Resources': resourcesRef,
+      }, latin1.encode(form.ops));
+    }
+    w.set(resourcesRef, <String, Object>{
       'Font': fontRefs,
-      if (gstates.isNotEmpty) 'ExtGState': gstates,
+      if (resources.graphicsStates.isNotEmpty) 'ExtGState': resources.graphicsStates,
+      if (resources.shadings.isNotEmpty) 'Shading': resources.shadings,
       if (xobjects.isNotEmpty) 'XObject': xobjects,
     });
     final kids = <PdfRef>[];

@@ -3,7 +3,7 @@
 > **O que é:** a análise de como o `package:pdf` (com o `package:printing`) é usado hoje nos dois apps e o plano, dividido em etapas, para escrever uma lib de PDF nossa que o substitua
 > **Para que serve:** alinhar a abordagem, a ordem de trabalho e as decisões em aberto antes de escrever código, e acompanhar o andamento etapa por etapa
 > **Quando consultar:** antes de começar cada etapa (seção 7), e sempre que uma pergunta da seção 11 for respondida
-> **Status:** 27/11/2026. Análise feita (seção 2); pilares definidos pelo usuário (seção 3); abordagem B confirmada pelo usuário (seção 4.2); etapa 1 concluída com a decisão de seguir com B ([prova-de-conceito.md](prova-de-conceito.md)); etapa 2 enviada ao GitHub, falta conferir a primeira execução do CI; etapa 3 concluída (tabela da seção 7.1).
+> **Status:** 27/11/2026. Análise feita (seção 2); pilares definidos pelo usuário (seção 3); abordagem B confirmada pelo usuário (seção 4.2); etapa 1 concluída com a decisão de seguir com B ([prova-de-conceito.md](prova-de-conceito.md)); etapas 2, 3 e 4 concluídas, com o CI verde no GitHub; a próxima é a 5 (tabela da seção 7.1).
 
 ## 1. Contexto
 
@@ -303,9 +303,9 @@ Cada etapa termina com testes e com um PDF de exemplo conferido em quatro leitor
 |---|---|---|---|
 | 0 | Linha de base | G | concluída em 27/11/2026 com um relatório de cada app ([linha-de-base.md](linha-de-base.md)) |
 | 1 | Prova de conceito (decide a abordagem) | P S G | concluída em 27/11/2026: seguir com B ([resultado](prova-de-conceito.md)) |
-| 2 | Fundação do pacote | — | enviada ao GitHub em 27/11/2026; falta conferir a primeira execução do CI na aba Actions |
-| 3 | Escritor PDF | — | concluída em 27/11/2026, com Acrobat e Android pendentes de conferência (seção 7.5) |
-| 4 | Canvas PDF | P G | não iniciada |
+| 2 | Fundação do pacote | — | concluída em 27/11/2026, com o CI verde no GitHub |
+| 3 | Escritor PDF | — | concluída em 27/11/2026; o `qpdf --check` passou no CI. Acrobat e Android pendentes de conferência (seção 7.5) |
+| 4 | Canvas PDF | P G | concluída em 27/11/2026: os 7 casos visuais batem com a pintura do Flutter no Poppler, no Ghostscript e no PDFium (seção 7.6) |
 | 5 | Texto e fontes | P S | não iniciada |
 | 6 | Imagens, SVG e QR | P | não iniciada |
 | 7 | Paginação | P S | não iniciada |
@@ -347,7 +347,7 @@ Cada etapa termina com testes e com um PDF de exemplo conferido em quatro leitor
 
 - [x] `pubspec.yaml`, `analysis_options.yaml`, estrutura de pastas (seção 8).
 - [x] App Flutter de exemplo em `example/`.
-- [ ] CI com `flutter analyze` e `flutter test` (`.github/workflows/ci.yml`; enviado ao GitHub em 27/11/2026, falta ver a execução passar na aba Actions, que o repositório privado não deixa ler daqui).
+- [x] CI com `flutter analyze` e `flutter test` (`.github/workflows/ci.yml`): verde no GitHub em 27/11/2026, nos commits `dd47c95` e `7a8a1ce`.
 - [x] Harness de benchmark que gera um relatório de exemplo e mede tempo e tamanho (`benchmark/run_android.sh`: no SM-X133, 572 a 596 ms com a lib contra 2.305 a 2.328 ms com o método atual).
 - [x] Desmontagem segura da árvore fora da tela, inclusive quando o sistema avisa troca de fontes durante a geração (visto na prova de conceito).
 - [x] Testes que travam os pontos em que a lib depende de detalhes internos do Flutter (como `updateCompositedLayer` no `Opacity`), para a atualização do Flutter quebrar o teste e não o relatório.
@@ -367,22 +367,31 @@ Cada etapa termina com testes e com um PDF de exemplo conferido em quatro leitor
 
 **Pronto quando:** um PDF gerado por teste abre nos três leitores e passa num validador de PDF.
 
-**Conferido em 27/11/2026:** os 14 PDFs dos testes passam no validador dos testes, no Ghostscript em modo estrito (`-dPDFSTOPONERROR`) e no Poppler (`pdfinfo`, `pdftotext`, `pdftoppm`) sem nenhum aviso. O relatório de exemplo abre certo no leitor do Chrome (PDFium, o mesmo motor do `PdfRenderer` do Android, que o `PdfPreview` usa). O `qpdf --check` roda no CI no próximo push. Falta abrir no Acrobat, que não roda nesta máquina, e no visualizador do Android, o que fica para a etapa 10, junto com o `PdfPreview`.
+**Conferido em 27/11/2026:** os 14 PDFs dos testes passam no validador dos testes, no Ghostscript em modo estrito (`-dPDFSTOPONERROR`) e no Poppler (`pdfinfo`, `pdftotext`, `pdftoppm`) sem nenhum aviso. O relatório de exemplo abre certo no leitor do Chrome (PDFium, o mesmo motor do `PdfRenderer` do Android, que o `PdfPreview` usa). O `qpdf --check` passou no CI (commit `7a8a1ce`). Falta abrir no Acrobat, que não roda nesta máquina, e no visualizador do Android, o que fica para a etapa 10, junto com o `PdfPreview`.
 
 ### 7.6 Etapa 4: canvas PDF
 
 **Objetivo:** todo comando de desenho do canvas do Flutter tem tradução, vetorial ou rasterizada.
 
-- [ ] Retângulo, retângulo arredondado, retângulo duplo, oval, círculo, arco, linha, pontos.
-- [ ] `Path` livre por amostragem; tipo de preenchimento (par-ímpar e não-zero).
-- [ ] Cor, espessura, ponta e junção de linha, tracejado.
-- [ ] Opacidade, gradiente linear e radial.
-- [ ] Transformação, recorte, `save`/`restore`.
-- [ ] Camadas do Flutter (opacidade, recorte, transformação) e rasterização da subárvore para efeitos sem equivalente.
-- [ ] Gradientes lidos no render object (`RenderDecoratedBox`), porque o shader do `dart:ui` é opaco (visto na prova de conceito).
-- [ ] Sombra de elevação (`drawShadow`), usada por `Card` e `Material`.
+- [x] Retângulo, retângulo arredondado, retângulo duplo, oval, círculo, arco, linha, pontos, `RSuperellipse` (pelo caminho exato do Flutter).
+- [x] `Path` livre por amostragem (o `Path` do 3.47 ainda não expõe os segmentos); tipo de preenchimento (par-ímpar e não-zero).
+- [x] Cor, espessura, ponta e junção de linha. O `Paint` do Flutter não tem tracejado: tracejados (como os do `fl_chart`) já chegam como caminhos.
+- [x] Opacidade como **grupo de transparência** (Form XObject): o conteúdo é composto antes do alfa, como na camada do Flutter. Com alfa objeto a objeto, o fundo aparecia através do texto.
+- [x] Modos de mistura separáveis (`multiply`, `screen`, `overlay`... 15 modos) viram `/BM`. Os de Porter-Duff (`xor`, `dstIn`...) não existem em PDF: viram `srcOver`, com aviso.
+- [x] Gradiente linear e radial (com foco, paradas, troca seca de cor e `GradientTransform`) em vetor, como shading do PDF.
+- [x] Gradientes lidos no render object (`RenderDecoratedBox` com `BoxDecoration` ou `ShapeDecoration`), porque o shader do `dart:ui` é opaco.
+- [x] Transformação, recorte (inclusive por diferença), `save`/`restore`/`saveLayer`, e `getLocalClipBounds` que acompanha recorte e transformação.
+- [x] Camadas do Flutter: opacidade, recorte e transformação viram operadores; filtro de cor (`ColorFiltered`), máscara de shader (`ShaderMask`) e filtro de imagem (`ImageFiltered`) rasterizam só a subárvore, pelo próprio Flutter.
+- [x] Sombra de elevação (`drawShadow`, de `Card`, `Material` e `PhysicalModel`) e desfoque (`BoxShadow`) rasterizados só em volta da forma.
+- [x] O que não tem equivalente sai como imagem só naquele trecho, com aviso: gradiente de varredura, cores com opacidades diferentes, shader pintado por painter (a borda continua vetorial, recortando a imagem), traço com shader, imagem com filtro de cor.
+- [x] Imagens: `drawImage`, `drawImageRect`, `drawImageNine` (nove partes), `drawAtlas`, opacidade da tinta e suavização conforme o `filterQuality`.
+- [x] Correção: o `RenderImage` descarta a imagem dele quando a árvore é desmontada, antes de a lib ler os pixels. Um `Image.asset` (como o logo dos relatórios) quebraria a geração; a lib agora guarda um clone do handle.
+
+Sem tradução, com aviso: `drawVertices`, `drawPicture` (etapa 6, SVG), `BackdropFilter` (precisa do que está atrás) e `saveLayer` com filtro.
 
 **Pronto quando:** um teste que pinta cada comando gera um PDF que, conferido nos três leitores, bate com a mesma pintura na tela.
+
+**Conferido em 27/11/2026:** `test/canvas_visual_test.dart` pinta sete casos (formas, transformações e recortes, opacidade e mistura, gradientes, sombras, imagens e camadas) pelo Flutter (PNG) e pela lib (PDF). O `tool/visual_diff.py` rasteriza cada PDF com o Poppler e o Ghostscript e conta os pixels diferentes, perdoando a suavização de borda: no máximo 0,043 % por caso. Antes de corrigir, o mesmo script acusou a suavização indevida das imagens (2,6 %) e a fonte errada dentro de `Card` (5,7 %), então ele pega erro de verdade. No Chrome (PDFium, o motor do `PdfPreview` no Android) os casos saem iguais a olho. O CI roda a comparação a cada push. Os 39 PDFs dos testes passam no Ghostscript estrito e no Poppler sem aviso.
 
 ### 7.7 Etapa 5: texto e fontes
 
@@ -431,6 +440,7 @@ Cada etapa termina com testes e com um PDF de exemplo conferido em quatro leitor
 - [ ] Um teste por widget, comparando PDF e tela.
 - [ ] Publicar a tabela de suporte em `docs/widgets-suportados.md`: vetor, rasterizado ou não suportado, com a alternativa para cada caso.
 - [ ] Documentar como montar conteúdo que na tela é rolável.
+- [ ] Tema do app dentro do PDF: a árvore do PDF não enxerga o `Theme` do app, então `Card`, `Material`, `ListTile` e afins usam o tema padrão (fonte Roboto, cores padrão). Visto na etapa 4: o texto de um `Card` saiu na fonte padrão. Receber o tema no `PdfDocument` (ou herdá-lo do `BuildContext` de quem gera).
 
 **Pronto quando:** todo widget do catálogo está na tabela, e nenhum dos usados nos relatórios atuais está como "não suportado".
 

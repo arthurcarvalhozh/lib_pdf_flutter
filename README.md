@@ -32,16 +32,18 @@ final bytes = await PdfDocument(
 - Cada família e peso usado num `TextStyle` precisa estar registrado em `fonts` e também declarado no `pubspec.yaml` do app, porque quem mede o texto é o Flutter.
 - Os metadados (`title`, `author`, `subject`, `keywords`, `creator`, `creationDate`) aparecem nas propriedades do arquivo. `PdfPageFormat` tem A3, A4, A5, Carta e Legal, `.landscape`, `.portrait` e `PdfPageFormat.millimeters(largura, altura)`; cada `MultiPage` pode ter o seu.
 - Com a mesma `creationDate`, o mesmo documento gera sempre os mesmos bytes.
-- `buildWithReport()` devolve, além dos bytes, os tempos e os avisos: o que não saiu fiel ao Flutter, como um gradiente que saiu em cor sólida. Em modo debug, `build()` escreve esses avisos no console.
+- Gradientes lineares e radiais, opacidade (como grupo, igual à camada do Flutter), modos de mistura, recortes e transformações saem em vetor. Sombras, desfoques, filtros de cor e gradientes de varredura saem como imagem só naquele trecho.
+- `buildWithReport()` devolve, além dos bytes, os tempos e os avisos: o que não saiu em vetor ou não saiu fiel ao Flutter, como uma sombra rasterizada. Em modo debug, `build()` escreve esses avisos no console.
 
-O que ainda falta (cabeçalho e rodapé por página, subset de fontes, gradientes, SVG) está nas etapas do plano.
+O que ainda falta (cabeçalho e rodapé por página, subset de fontes, SVG, o tema do app dentro do PDF) está nas etapas do plano.
 
 ## Desenvolvimento
 
 O Flutter está fixado em 3.47.1 (`.fvmrc`), a mesma versão do diagnox e do valvulas.
 
 ```
-fvm flutter test                    # testes do pacote
+fvm flutter test                    # testes do pacote; PDFs em build/pdfs/ e build/visual/
+python3 tool/visual_diff.py         # compara build/visual/ com a pintura do Flutter (precisa de pdftoppm ou gs e do Pillow)
 cd example && fvm flutter test      # gera example/build/exemplo/relatorio_exemplo.pdf
 benchmark/run_android.sh            # mede num aparelho Android conectado (instala e desinstala o app de exemplo)
 ```
@@ -53,5 +55,6 @@ benchmark/run_android.sh            # mede num aparelho Android conectado (insta
 | `lib/` | O pacote. API pública em `lib/lib_pdf.dart` |
 | `example/` | App de exemplo com um relatório no molde do relatório de NOx, também usado para medir |
 | `benchmark/` | Script de medida em aparelho |
-| `docs/` | [Plano](docs/plano-de-desenvolvimento.md) e [resultado da prova de conceito](docs/prova-de-conceito.md) |
+| `tool/` | Comparação visual dos PDFs com a pintura do Flutter |
+| `docs/` | [Plano](docs/plano-de-desenvolvimento.md), [resultado da prova de conceito](docs/prova-de-conceito.md) e [linha de base](docs/linha-de-base.md) |
 | `poc/` | Prova de conceito da etapa 1, mantida só como referência |

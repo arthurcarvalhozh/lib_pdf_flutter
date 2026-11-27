@@ -37,19 +37,29 @@ jobs:
 
       # Validador independente da lib: todo PDF gerado pelos testes tem de
       # passar no qpdf sem erro nem aviso.
-      - name: Validação dos PDFs (qpdf --check)
+      - name: Leitores e validador de PDF
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq qpdf
+          sudo apt-get install -y -qq qpdf poppler-utils ghostscript python3-pil
           qpdf --version | head -1
+          pdftoppm -v 2>&1 | head -1
+          gs --version
+
+      - name: Validação dos PDFs (qpdf --check)
+        run: |
           status=0
-          for f in build/pdfs/*.pdf example/build/exemplo/*.pdf; do
+          for f in build/pdfs/*.pdf build/visual/*.pdf example/build/exemplo/*.pdf; do
             if ! out=$(qpdf --check "$f" 2>&1); then
               echo "::error file=$f::$out"
               status=1
             fi
           done
           exit $status
+
+      # Cada caso de test/canvas_visual_test.dart rasterizado pelo Poppler e
+      # pelo Ghostscript tem de bater com a pintura do Flutter.
+      - name: Comparação visual com a pintura do Flutter
+        run: python3 tool/visual_diff.py build/visual
 
       - name: PDFs gerados pelos testes
         if: always()
@@ -58,5 +68,6 @@ jobs:
           name: pdfs
           path: |
             build/pdfs/*.pdf
+            build/visual/
             example/build/exemplo/*.pdf
           if-no-files-found: ignore

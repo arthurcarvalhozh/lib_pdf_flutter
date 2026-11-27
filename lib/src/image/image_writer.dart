@@ -5,7 +5,9 @@ import '../document/pdf_writer.dart';
 
 /// Embute uma imagem já decodificada pelo Flutter: pixels RGB comprimidos e,
 /// se houver transparência, uma máscara (SMask) com o canal alfa.
-Future<PdfRef> writeImage(PdfWriter w, ui.Image image) async {
+///
+/// [interpolate] pede ao leitor que suavize a imagem ao ampliá-la.
+Future<PdfRef> writeImage(PdfWriter w, ui.Image image, {bool interpolate = true}) async {
   final data = await image.toByteData(format: ui.ImageByteFormat.rawStraightRgba);
   final rgba = data!.buffer.asUint8List();
   final n = image.width * image.height;
@@ -37,7 +39,7 @@ Future<PdfRef> writeImage(PdfWriter w, ui.Image image) async {
     'Height': image.height,
     'ColorSpace': const PdfName('DeviceRGB'),
     'BitsPerComponent': 8,
-    'Interpolate': true,
+    if (interpolate) 'Interpolate': true,
     'SMask': ?smask,
   }, rgb);
 }

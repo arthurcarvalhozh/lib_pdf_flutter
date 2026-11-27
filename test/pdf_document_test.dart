@@ -104,11 +104,13 @@ void main() {
     final (result, _) = await buildPdf(tester, fonts, [
       Container(
         height: 40,
-        decoration: const BoxDecoration(gradient: LinearGradient(colors: [Colors.red, Colors.blue])),
+        // Gradiente de varredura não existe em PDF: vira imagem, com aviso.
+        decoration: const BoxDecoration(gradient: SweepGradient(colors: [Colors.red, Colors.blue])),
       ),
     ]);
 
     expect(result.pageCount, 1);
+    expect(result.imageCount, 1);
     expect(result.warnings.keys, contains(contains('gradiente')));
   });
 
