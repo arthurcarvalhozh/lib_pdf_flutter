@@ -26,10 +26,10 @@ class PdfString {
   final String value;
 }
 
-/// Monta o arquivo PDF a partir de objetos numerados.
+/// Monta o arquivo PDF (versão 1.7) a partir de objetos numerados.
 ///
-/// Prova de conceito: só o que a etapa 1 precisa (dicionários, arrays,
-/// streams comprimidos, xref e trailer).
+/// Os objetos são escritos na ordem dos números, com a tabela xref clássica
+/// e o trailer no fim. Streams são comprimidos com Flate.
 class PdfWriter {
   final List<Uint8List?> _bodies = [];
 
@@ -69,6 +69,8 @@ class PdfWriter {
     _bodies[ref.id - 1] = out.toBytes();
   }
 
+  /// Escreve o arquivo. O `/ID` do trailer é derivado do conteúdo: o mesmo
+  /// documento gera sempre o mesmo arquivo, byte a byte.
   Uint8List build({required PdfRef root, PdfRef? info}) {
     final out = BytesBuilder(copy: false);
     out.add(latin1.encode('%PDF-1.7\n'));
@@ -91,7 +93,13 @@ class PdfWriter {
     for (final offset in offsets) {
       xref.write('${offset.toString().padLeft(10, '0')} 00000 n \n');
     }
-    final trailer = <String, Object>{'Size': _bodies.length + 1, 'Root': root, 'Info': ?info};
+    final id = PdfRaw('<${_fingerprint(out.toBytes())}>');
+    final trailer = <String, Object>{
+      'Size': _bodies.length + 1,
+      'Root': root,
+      'Info': ?info,
+      'ID': [id, id],
+    };
     xref
       ..write('trailer\n${encode(trailer)}\n')
       ..write('startxref\n$xrefOffset\n%%EOF\n');
@@ -102,7 +110,7 @@ class PdfWriter {
   static String encode(Object? value) {
     if (value == null) return 'null';
     if (value is PdfRef) return '${value.id} 0 R';
-    if (value is PdfName) return '/${value.value}';
+    if (value is PdfName) return name(value.value);
     if (value is PdfRaw) return value.value;
     if (value is bool) return value ? 'true' : 'false';
     if (value is int) return value.toString();
@@ -112,11 +120,50 @@ class PdfWriter {
     if (value is List) return '[${value.map(encode).join(' ')}]';
     if (value is Map<String, Object?>) {
       final b = StringBuffer('<<');
-      value.forEach((k, v) => b.write(' /$k ${encode(v)}'));
+      value.forEach((k, v) => b.write(' ${name(k)} ${encode(v)}'));
       b.write(' >>');
       return b.toString();
     }
     throw ArgumentError('Valor sem codificação PDF: ${value.runtimeType}');
+  }
+
+  /// Nome PDF com os caracteres especiais escapados como `#xx` (seção
+  /// 7.3.5 da ISO 32000-1): fora de `!`..`~`, delimitadores e o próprio `#`.
+  static String name(String value) {
+    final b = StringBuffer('/');
+    for (final byte in utf8.encode(value)) {
+      final regular = byte > 0x20 && byte < 0x7F && !'()<>[]{}/%#'.codeUnits.contains(byte);
+      b.write(regular ? String.fromCharCode(byte) : '#${byte.toRadixString(16).padLeft(2, '0').toUpperCase()}');
+    }
+    return b.toString();
+  }
+
+  /// Data no formato PDF (`D:AAAAMMDDHHmmSS-03'00'`), com o fuso de [date].
+  static PdfRaw date(DateTime date) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    final offset = date.timeZoneOffset;
+    final sign = offset.isNegative ? '-' : '+';
+    final abs = offset.abs();
+    final zone = date.isUtc ? 'Z' : "$sign${two(abs.inHours)}'${two(abs.inMinutes % 60)}'";
+    return PdfRaw(
+      '(D:${date.year.toString().padLeft(4, '0')}${two(date.month)}${two(date.day)}'
+      '${two(date.hour)}${two(date.minute)}${two(date.second)}$zone)',
+    );
+  }
+
+  /// 16 bytes em hexadecimal derivados de [data] (dois FNV-1a de 64 bits
+  /// com sementes diferentes). Não é criptográfico: só identifica o arquivo.
+  /// Usa a multiplicação de 64 bits do `int` nativo, que dá a volta.
+  static String _fingerprint(Uint8List data) {
+    var a = 0xcbf29ce484222325;
+    var b = 0x84222325cbf29ce4;
+    const prime = 0x100000001b3;
+    for (final byte in data) {
+      a = (a ^ byte) * prime;
+      b = (b ^ byte ^ 0x5a) * prime;
+    }
+    String hex(int v) => BigInt.from(v).toUnsigned(64).toRadixString(16).padLeft(16, '0');
+    return hex(a) + hex(b);
   }
 
   /// Número com até 4 casas, sem zeros sobrando.

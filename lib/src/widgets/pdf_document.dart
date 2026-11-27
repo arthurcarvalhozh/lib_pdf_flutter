@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
@@ -30,17 +32,34 @@ import 'multi_page.dart';
 /// Os widgets são montados e medidos fora da tela pelo próprio Flutter, e o
 /// desenho deles vai para o PDF em vetor: texto real, linhas e curvas.
 class PdfDocument {
-  PdfDocument({required this.fonts, required this.pages, this.title, this.author, this.textStyle})
-    : assert(fonts.isNotEmpty, 'Registre pelo menos uma fonte.');
+  PdfDocument({
+    required this.fonts,
+    required this.pages,
+    this.title,
+    this.author,
+    this.subject,
+    this.keywords,
+    this.creator,
+    this.creationDate,
+    this.textStyle,
+  }) : assert(fonts.isNotEmpty, 'Registre pelo menos uma fonte.');
 
   /// Fontes que o PDF pode usar. A primeira é a padrão.
   final List<PdfFont> fonts;
 
   final List<MultiPage> pages;
 
-  /// Metadados do arquivo.
+  /// Metadados do arquivo, que os leitores mostram nas propriedades.
   final String? title;
   final String? author;
+  final String? subject;
+  final String? keywords;
+
+  /// O app que criou o documento, por exemplo `diagnox 3.7.3`.
+  final String? creator;
+
+  /// Data de criação. Sem ela, a hora da geração.
+  final DateTime? creationDate;
 
   /// Estilo de texto padrão, como um `DefaultTextStyle` em volta de tudo.
   /// Sem ele: a primeira fonte registrada, tamanho 10, preto.
@@ -143,7 +162,7 @@ class PdfDocument {
     });
     final kids = <PdfRef>[];
     for (final (spec, ops) in pageOps) {
-      final contents = w.addStream({}, ops.codeUnits);
+      final contents = w.addStream({}, latin1.encode(ops));
       kids.add(
         w.add(<String, Object>{
           'Type': const PdfName('Page'),
@@ -156,10 +175,16 @@ class PdfDocument {
     }
     w.set(pagesRef, <String, Object>{'Type': const PdfName('Pages'), 'Kids': kids, 'Count': kids.length});
     w.set(catalog, <String, Object>{'Type': const PdfName('Catalog'), 'Pages': pagesRef});
+    final created = PdfWriter.date(creationDate ?? DateTime.now());
     final info = w.add(<String, Object>{
       if (title != null) 'Title': PdfString(title!),
       if (author != null) 'Author': PdfString(author!),
+      if (subject != null) 'Subject': PdfString(subject!),
+      if (keywords != null) 'Keywords': PdfString(keywords!),
+      if (creator != null) 'Creator': PdfString(creator!),
       'Producer': const PdfString('lib_pdf'),
+      'CreationDate': created,
+      'ModDate': created,
     });
     final bytes = w.build(root: catalog, info: info);
     final writeTime = sw.elapsed;

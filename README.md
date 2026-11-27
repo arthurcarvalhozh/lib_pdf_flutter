@@ -16,6 +16,7 @@ final bytes = await PdfDocument(
     await PdfFont.asset('assets/fonts/Montserrat-Bold.ttf', family: 'Montserrat', weight: FontWeight.bold),
   ],
   title: 'Relatório',
+  creator: 'diagnox 3.7.3',
   pages: [
     MultiPage(children: [
       const Text('Relatório do sensor de NOx', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
@@ -29,6 +30,8 @@ final bytes = await PdfDocument(
 - Os `children` são widgets do Flutter: `Text`, `Table`, `Row`, `Container`, `ClipRRect`, `Opacity`, `CustomPaint`, gráficos do `fl_chart`, `QrImageView`...
 - A lib quebra a página entre linhas de texto e de tabela, nunca no meio delas. `KeepTogether` mantém um bloco inteiro na mesma página.
 - Cada família e peso usado num `TextStyle` precisa estar registrado em `fonts` e também declarado no `pubspec.yaml` do app, porque quem mede o texto é o Flutter.
+- Os metadados (`title`, `author`, `subject`, `keywords`, `creator`, `creationDate`) aparecem nas propriedades do arquivo. `PdfPageFormat` tem A3, A4, A5, Carta e Legal, `.landscape`, `.portrait` e `PdfPageFormat.millimeters(largura, altura)`; cada `MultiPage` pode ter o seu.
+- Com a mesma `creationDate`, o mesmo documento gera sempre os mesmos bytes.
 - `buildWithReport()` devolve, além dos bytes, os tempos e os avisos: o que não saiu fiel ao Flutter, como um gradiente que saiu em cor sólida. Em modo debug, `build()` escreve esses avisos no console.
 
 O que ainda falta (cabeçalho e rodapé por página, subset de fontes, gradientes, SVG) está nas etapas do plano.

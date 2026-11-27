@@ -3,7 +3,7 @@
 > **O que é:** a análise de como o `package:pdf` (com o `package:printing`) é usado hoje nos dois apps e o plano, dividido em etapas, para escrever uma lib de PDF nossa que o substitua
 > **Para que serve:** alinhar a abordagem, a ordem de trabalho e as decisões em aberto antes de escrever código, e acompanhar o andamento etapa por etapa
 > **Quando consultar:** antes de começar cada etapa (seção 7), e sempre que uma pergunta da seção 11 for respondida
-> **Status:** 27/11/2026. Análise feita (seção 2); pilares definidos pelo usuário (seção 3); abordagem B confirmada pelo usuário (seção 4.2); etapa 1 concluída com a decisão de seguir com B ([prova-de-conceito.md](prova-de-conceito.md)); etapa 2 pronta localmente, falta o CI rodar no GitHub (tabela da seção 7.1).
+> **Status:** 27/11/2026. Análise feita (seção 2); pilares definidos pelo usuário (seção 3); abordagem B confirmada pelo usuário (seção 4.2); etapa 1 concluída com a decisão de seguir com B ([prova-de-conceito.md](prova-de-conceito.md)); etapa 2 enviada ao GitHub, falta conferir a primeira execução do CI; etapa 3 concluída (tabela da seção 7.1).
 
 ## 1. Contexto
 
@@ -303,8 +303,8 @@ Cada etapa termina com testes e com um PDF de exemplo conferido em quatro leitor
 |---|---|---|---|
 | 0 | Linha de base | G | concluída em 27/11/2026 com um relatório de cada app ([linha-de-base.md](linha-de-base.md)) |
 | 1 | Prova de conceito (decide a abordagem) | P S G | concluída em 27/11/2026: seguir com B ([resultado](prova-de-conceito.md)) |
-| 2 | Fundação do pacote | — | pronta localmente; falta o CI rodar no GitHub (precisa de push) |
-| 3 | Escritor PDF | — | não iniciada |
+| 2 | Fundação do pacote | — | enviada ao GitHub em 27/11/2026; falta conferir a primeira execução do CI na aba Actions |
+| 3 | Escritor PDF | — | concluída em 27/11/2026, com Acrobat e Android pendentes de conferência (seção 7.5) |
 | 4 | Canvas PDF | P G | não iniciada |
 | 5 | Texto e fontes | P S | não iniciada |
 | 6 | Imagens, SVG e QR | P | não iniciada |
@@ -347,7 +347,7 @@ Cada etapa termina com testes e com um PDF de exemplo conferido em quatro leitor
 
 - [x] `pubspec.yaml`, `analysis_options.yaml`, estrutura de pastas (seção 8).
 - [x] App Flutter de exemplo em `example/`.
-- [ ] CI com `flutter analyze` e `flutter test` (`.github/workflows/ci.yml` escrito e conferido localmente; roda no GitHub no primeiro push).
+- [ ] CI com `flutter analyze` e `flutter test` (`.github/workflows/ci.yml`; enviado ao GitHub em 27/11/2026, falta ver a execução passar na aba Actions, que o repositório privado não deixa ler daqui).
 - [x] Harness de benchmark que gera um relatório de exemplo e mede tempo e tamanho (`benchmark/run_android.sh`: no SM-X133, 572 a 596 ms com a lib contra 2.305 a 2.328 ms com o método atual).
 - [x] Desmontagem segura da árvore fora da tela, inclusive quando o sistema avisa troca de fontes durante a geração (visto na prova de conceito).
 - [x] Testes que travam os pontos em que a lib depende de detalhes internos do Flutter (como `updateCompositedLayer` no `Opacity`), para a atualização do Flutter quebrar o teste e não o relatório.
@@ -358,11 +358,16 @@ Cada etapa termina com testes e com um PDF de exemplo conferido em quatro leitor
 
 **Objetivo:** gerar um arquivo PDF válido a partir de objetos.
 
-- [ ] Documento, páginas, tabela xref, trailer, metadados (título, autor, data).
-- [ ] Streams de conteúdo comprimidos.
-- [ ] Formatos de página (A4, Carta), retrato e paisagem.
+- [x] Documento, páginas, tabela xref, trailer com `/ID`, metadados (título, autor, assunto, palavras-chave, criador, datas de criação e modificação com fuso).
+- [x] Streams de conteúdo comprimidos (Flate).
+- [x] Formatos de página (A3, A4, A5, Carta, Legal e em milímetros), retrato e paisagem, um por `MultiPage`.
+- [x] Nomes PDF escapados (`#xx`), strings em UTF-16BE quando não são ASCII, arquivo igual byte a byte para o mesmo documento e a mesma data.
+- [x] Validador nos testes (`test/support/pdf_validator.dart`): todo PDF gerado por teste é conferido (xref, `/Length`, streams, referências, árvore de páginas, `q`/`Q` e `BT`/`ET`) e salvo em `build/pdfs/`.
+- [x] `qpdf --check` no CI sobre todos os PDFs gerados pelos testes.
 
 **Pronto quando:** um PDF gerado por teste abre nos três leitores e passa num validador de PDF.
+
+**Conferido em 27/11/2026:** os 14 PDFs dos testes passam no validador dos testes, no Ghostscript em modo estrito (`-dPDFSTOPONERROR`) e no Poppler (`pdfinfo`, `pdftotext`, `pdftoppm`) sem nenhum aviso. O relatório de exemplo abre certo no leitor do Chrome (PDFium, o mesmo motor do `PdfRenderer` do Android, que o `PdfPreview` usa). O `qpdf --check` roda no CI no próximo push. Falta abrir no Acrobat, que não roda nesta máquina, e no visualizador do Android, o que fica para a etapa 10, junto com o `PdfPreview`.
 
 ### 7.6 Etapa 4: canvas PDF
 

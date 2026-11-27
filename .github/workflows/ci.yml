@@ -35,10 +35,28 @@ jobs:
           flutter analyze
           flutter test
 
+      # Validador independente da lib: todo PDF gerado pelos testes tem de
+      # passar no qpdf sem erro nem aviso.
+      - name: Validação dos PDFs (qpdf --check)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qpdf
+          qpdf --version | head -1
+          status=0
+          for f in build/pdfs/*.pdf example/build/exemplo/*.pdf; do
+            if ! out=$(qpdf --check "$f" 2>&1); then
+              echo "::error file=$f::$out"
+              status=1
+            fi
+          done
+          exit $status
+
       - name: PDFs gerados pelos testes
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pdfs
-          path: example/build/exemplo/*.pdf
+          path: |
+            build/pdfs/*.pdf
+            example/build/exemplo/*.pdf
           if-no-files-found: ignore
