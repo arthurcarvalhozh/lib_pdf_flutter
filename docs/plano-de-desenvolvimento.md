@@ -13,6 +13,8 @@ Os dois apps geram o relatório de teste em PDF com o `package:pdf` e mostram, s
 2. **Sintaxe.** Escrever o PDF deve ser igual a escrever uma tela em Flutter, sem precisar aprender uma API nova.
 3. **Gráficos.** Hoje o gráfico do teste é capturado da tela como PNG e colado no PDF: é uma prática ruim e deixa a geração lenta. O gráfico deve ser desenhado direto no PDF, em vetor.
 
+**O visualizador de PDF fica como está hoje** (decisão do usuário em 27/11/2026). Os apps continuam mostrando o PDF no `PdfPreview` do `printing`, no mesmo `Dialog`, com os mesmos botões de baixar e compartilhar. A lib troca só a geração dos bytes; o operador não vê diferença no visualizador.
+
 ## 2. Como a lib atual é usada hoje
 
 ### 2.1 Inventário
@@ -283,7 +285,6 @@ O que a lib acrescenta ao Flutter:
 | `PageBreak`, `KeepTogether`, `RepeatOnEachPage` | Controle da paginação |
 | registro de fontes | Liga o nome da família no `TextStyle` aos bytes da fonte |
 | gráficos | Widgets de gráfico que funcionam na tela e no PDF (seção 6) |
-| preview | Mostra as páginas na tela desenhadas pelo próprio Flutter, sem rasterizar o PDF (etapa 10) |
 
 ## 6. Gráficos
 
@@ -294,7 +295,7 @@ O que a lib acrescenta ao Flutter:
 
 ## 7. Etapas
 
-Cada etapa termina com testes e com um PDF de exemplo conferido em três leitores (Chrome, Acrobat e o visualizador padrão do Android). Pilares: **P** personalização, **S** sintaxe, **G** gráficos.
+Cada etapa termina com testes e com um PDF de exemplo conferido em quatro leitores: Chrome, Acrobat, o visualizador padrão do Android e o `PdfPreview` dos apps. Pilares: **P** personalização, **S** sintaxe, **G** gráficos.
 
 ### 7.1 Acompanhamento
 
@@ -310,10 +311,10 @@ Cada etapa termina com testes e com um PDF de exemplo conferido em três leitore
 | 7 | Paginação | P S | não iniciada |
 | 8 | Cobertura de widgets | P S | não iniciada |
 | 9 | Gráficos nativos | G | não iniciada |
-| 10 | Preview, salvar e compartilhar | S | não iniciada |
+| 10 | Ligação com o visualizador atual | S | não iniciada |
 | 11 | Migração do diagnox | P S G | não iniciada |
 | 12 | Migração do valvulas | P S G | não iniciada |
-| 13 | Retirada do `pdf`/`printing` e guia de uso | S | não iniciada |
+| 13 | Retirada do `pdf` e guia de uso | S | não iniciada |
 
 ### 7.2 Etapa 0: linha de base
 
@@ -442,14 +443,15 @@ Cada etapa termina com testes e com um PDF de exemplo conferido em três leitore
 
 **Pronto quando:** os gráficos de NOx, O₂, tensão × corrente (diagnox) e de um relatório EBS (valvulas) saem no PDF sem nenhuma imagem e com o visual aprovado pelo usuário.
 
-### 7.12 Etapa 10: preview, salvar e compartilhar
+### 7.12 Etapa 10: ligação com o visualizador atual
 
-**Objetivo:** substituir o `PdfPreview` do `printing` e o código duplicado dos dois `*_viewer_service.dart`.
+**Objetivo:** os bytes da lib entram no visualizador de hoje sem mudar nada do que o operador vê (seção 1).
 
-- [ ] Preview que desenha as páginas com o próprio Flutter (as páginas já são widgets), com zoom.
-- [ ] Salvar e compartilhar, no lugar decidido na pergunta 4 da seção 11.
+- [ ] Os serviços de PDF dos dois apps devolvem os bytes da lib no lugar do `pw.Document`, e o `PdfPreview` recebe esses bytes como hoje.
+- [ ] Conferir que o `PdfPreview` (que no Android desenha o PDF com o pdfium) mostra os PDFs da lib iguais aos outros leitores: fontes embutidas, transparência, recortes.
+- [ ] Baixar e compartilhar continuam funcionando, com os mesmos nomes de arquivo.
 
-**Pronto quando:** o fluxo de preview, salvar e compartilhar dos dois apps funciona sem o `printing`.
+**Pronto quando:** visualizador, baixar e compartilhar funcionam com o PDF da lib nos dois apps, sem diferença visível para o operador.
 
 ### 7.13 Etapa 11: migração do diagnox
 
@@ -474,12 +476,12 @@ Cada etapa termina com testes e com um PDF de exemplo conferido em três leitore
 
 **Pronto quando:** o relatório sai pela lib nova, aprovado lado a lado com o PDF de referência.
 
-### 7.15 Etapa 13: retirada do `pdf`/`printing` e guia de uso
+### 7.15 Etapa 13: retirada do `pdf` e guia de uso
 
-- [ ] Remover `pdf` e `printing` dos `pubspec.yaml` dos dois apps.
+- [ ] Remover o `pdf` dos `pubspec.yaml` dos dois apps. O `printing` fica, porque é o visualizador (seção 1); ele continua trazendo o `package:pdf` como dependência indireta, mas o código dos apps deixa de usá-lo.
 - [ ] Guia de uso em `docs/guia-de-uso.md`, escrito para quem já sabe Flutter.
 
-**Pronto quando:** nenhum dos dois apps depende mais do `pdf` nem do `printing`.
+**Pronto quando:** nenhum dos dois apps importa mais o `package:pdf`; o `printing` fica só para o visualizador.
 
 ## 8. Estrutura proposta do repositório
 
@@ -496,7 +498,6 @@ lib_pdf/
       pagination/         pontos de quebra, páginas, cabeçalho e rodapé
       widgets/            PdfDocument, Page, MultiPage, PageBreak, KeepTogether
       charts/             LineChart e eixos
-      preview/            preview das páginas na tela
   test/
   example/                app Flutter de exemplo
   benchmark/
@@ -526,7 +527,7 @@ lib_pdf/
 1. ~~**Abordagem:** você confirma a abordagem B (seção 4.2), com a etapa 1 decidindo se ela se sustenta?~~ **Respondida em 27/11/2026:** sim, abordagem B.
 2. **Dependências:** a lib pode depender de outros pacotes (por exemplo `share_plus` e `path_provider` para compartilhar), ou deve depender só do Flutter?
 3. **Gráficos:** além de linha, quais tipos são necessários (barra, pizza, gauge)? O visual no papel deve ser igual ao da tela (card colorido, linha branca) ou próprio para papel (fundo branco)?
-4. **Preview, salvar e compartilhar:** ficam na lib ou em cada app?
+4. ~~**Preview, salvar e compartilhar:** ficam na lib ou em cada app?~~ **Respondida em 27/11/2026:** o visualizador fica como está hoje, em cada app (`PdfPreview` do `printing`); a lib não tem preview próprio.
 5. **Fontes:** quais famílias os PDFs vão usar? De onde vem a fonte para chinês?
 6. **Plataformas:** o PDF precisa ser gerado também no web e no desktop do valvulas?
 7. **Componentes de relatório:** com a abordagem B, cada app pode usar os próprios componentes de tela no PDF. Ainda vale ter componentes compartilhados (cabeçalho, seção, tabela chave/valor) na lib?

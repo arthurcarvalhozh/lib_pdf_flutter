@@ -1,7 +1,7 @@
 # lib_pdf
 
 > **O que é:** lib de PDF para Flutter: o relatório é escrito com widgets comuns do Flutter, e a lib desenha esses widgets direto em PDF, em vetor e com texto real
-> **Para que serve:** substituir o `package:pdf` e o `package:printing` no diagnox e no valvulas
+> **Para que serve:** substituir o `package:pdf` na geração dos relatórios do diagnox e do valvulas. O visualizador dos apps (`PdfPreview` do `printing`) continua o mesmo
 > **Quando consultar:** para usar a lib, rodar os testes ou medir o desempenho
 > **Status:** em desenvolvimento, ainda não usada nos apps. Andamento por etapa na seção 7.1 do [plano](docs/plano-de-desenvolvimento.md).
 
@@ -31,7 +31,7 @@ final bytes = await PdfDocument(
 - Cada família e peso usado num `TextStyle` precisa estar registrado em `fonts` e também declarado no `pubspec.yaml` do app, porque quem mede o texto é o Flutter.
 - `buildWithReport()` devolve, além dos bytes, os tempos e os avisos: o que não saiu fiel ao Flutter, como um gradiente que saiu em cor sólida. Em modo debug, `build()` escreve esses avisos no console.
 
-O que ainda falta (cabeçalho e rodapé por página, subset de fontes, gradientes, SVG, preview) está nas etapas do plano.
+O que ainda falta (cabeçalho e rodapé por página, subset de fontes, gradientes, SVG) está nas etapas do plano.
 
 ## Desenvolvimento
 

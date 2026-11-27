@@ -1,5 +1,5 @@
 name: lib_pdf
-description: PDF feito com widgets do Flutter, em vetor e com texto real. Substitui o package:pdf e o package:printing no diagnox e no valvulas.
+description: PDF feito com widgets do Flutter, em vetor e com texto real. Substitui o package:pdf na geração dos relatórios do diagnox e do valvulas.
 version: 0.1.0-dev.1
 publish_to: none
 repository: https://github.com/arthurcarvalhozh/lib_pdf_flutter
