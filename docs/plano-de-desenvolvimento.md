@@ -301,7 +301,7 @@ Cada etapa termina com testes e com um PDF de exemplo conferido em quatro leitor
 
 | Etapa | Nome | Pilares | Status |
 |---|---|---|---|
-| 0 | Linha de base | G | aguardando o usuário (precisa dos apps com relatórios reais no aparelho) |
+| 0 | Linha de base | G | em andamento: bomba de ARLA medida ([linha-de-base.md](linha-de-base.md)); falta o valvulas e os outros três relatórios do diagnox |
 | 1 | Prova de conceito (decide a abordagem) | P S G | concluída em 27/11/2026: seguir com B ([resultado](prova-de-conceito.md)) |
 | 2 | Fundação do pacote | — | pronta localmente; falta o CI rodar no GitHub (precisa de push) |
 | 3 | Escritor PDF | — | não iniciada |
@@ -324,7 +324,7 @@ Cada etapa termina com testes e com um PDF de exemplo conferido em quatro leitor
 - [ ] Medir nos dois apps, para cada tipo de relatório: tempo do toque no botão até o preview aberto, separado em captura dos gráficos, montagem, `save()` e escrita do arquivo.
 - [ ] Registrar o tamanho do arquivo de um relatório típico de cada tipo.
 - [ ] Guardar um PDF de referência de cada tipo de relatório para a comparação visual.
-- [ ] Registrar tudo em `docs/linha-de-base.md`.
+- [ ] Registrar tudo em `docs/linha-de-base.md` (criado; bomba de ARLA registrada).
 
 **Pronto quando:** existe um número de tempo e de tamanho para cada um dos cinco tipos de relatório (quatro do diagnox, um do valvulas).
 
