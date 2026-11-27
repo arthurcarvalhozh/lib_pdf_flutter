@@ -1,0 +1,36 @@
+name: lib_pdf_poc
+description: "Prova de conceito da lib de PDF (etapa 1): widgets do Flutter pintados direto em PDF vetorial."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Mesmas versões travadas no diagnox e no valvulas: a prova usa os widgets
+  # que os apps já usam, sem adaptação.
+  fl_chart: 0.68.0
+  qr_flutter: 4.1.0
+  # Só para o comparativo com o método atual (captura da tela + package:pdf).
+  # Não é dependência da lib nova.
+  pdf: 3.11.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  fonts:
+    - family: Montserrat
+      fonts:
+        - asset: assets/fonts/Montserrat-Regular.ttf
+        - asset: assets/fonts/Montserrat-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Montserrat-Bold.ttf
+          weight: 700
+  assets:
+    - assets/fonts/
